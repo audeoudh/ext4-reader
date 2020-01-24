@@ -123,6 +123,14 @@ class Superblock(ctypes.LittleEndianStructure):
     def block_size(self):
         return 2 ** (10 + self.s_log_block_size)
 
+    def has_flag(self, flag):
+        if isinstance(flag, self.FeatureIncompat):
+            return self.s_feature_incompat & flag != 0
+        elif isinstance(flag, self.FeatureRoCompat):
+            return self.s_feature_ro_compat & flag != 0
+        else:
+            raise FSException(f"Unknown flag {flag}")
+
     # Field types
 
     class FeatureRoCompat(enum.IntEnum):
@@ -183,11 +191,11 @@ class BlockGroupDescriptor(ctypes.LittleEndianStructure):
     def read_bytes(self, group_number, struct_data):
         fit = min(len(struct_data), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
-        self._verify_checksums(struct_data)
         self._verify_checksums(group_number)
+        return self
 
     def _verify_checksums(self, group_number):
-        data = self.filesystem.UUID
+        data = bytes(self.filesystem.UUID)
         data += group_number.to_bytes(4, 'little')
         data += bytes(self)[:0x1E]  # FIXME for 64bits structure…
         if self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM != 0 \
@@ -208,12 +216,8 @@ class BlockGroupDescriptor(ctypes.LittleEndianStructure):
     def bg_inode_bitmap(self):
         return (self.bg_inode_bitmap_hi << 32) + self.bg_inode_bitmap_lo
 
-    def bg_inode_table(self):
-        if (self.filesystem.conf.s_feature_incompat & self.filesystem.conf.FeatureIncompat.INCOMPAT_64BIT != 0) \
-                and self.filesystem.conf.s_desc_size > 32:
-            return (self.bg_inode_table_hi << 32) + self.bg_inode_table_lo
-        else:
-            return self.bg_inode_table_lo
+    def get_inode_table_loc(self):
+        return self.bg_inode_table_lo
 
 
 class BlockGroupDescriptor64(BlockGroupDescriptor):
@@ -231,18 +235,73 @@ class BlockGroupDescriptor64(BlockGroupDescriptor):
         ("bg_reserved", ctypes.c_uint32)
     ]
 
+    def get_inode_table_loc(self):
+        return (self.bg_inode_table_hi << 32) + self.bg_inode_table_lo
 
-class Inode:
-    def __init__(self, filesystem, raw_entry):
+
+class Inode(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("i_mode", ctypes.c_uint16),
+        ("i_uid", ctypes.c_uint16),
+        ("i_size_lo", ctypes.c_uint32),
+        ("i_atime", ctypes.c_uint32),
+        ("i_ctime", ctypes.c_uint32),
+        ("i_mtime", ctypes.c_uint32),
+        ("i_dtime", ctypes.c_uint32),
+        ("i_gid", ctypes.c_uint16),
+        ("i_links_count", ctypes.c_uint16),
+        ("i_blocks_lo", ctypes.c_uint32),
+        ("i_flags", ctypes.c_uint32),
+        ("i_osd1", ctypes.c_uint8 * 4),
+        ("i_block", ctypes.c_uint8 * 60),
+        ("i_generation", ctypes.c_uint32),
+        ("i_file_acl_lo", ctypes.c_uint32),
+        ("i_size_high", ctypes.c_uint32),  # i_dir_acl in ext2/3
+        ("i_obso_faddr", ctypes.c_uint32),
+        ("i_osd2", ctypes.c_uint8 * 12),
+        ("i_extra_isize", ctypes.c_uint16),
+        ("i_checksum_hi", ctypes.c_uint16),
+        ("i_ctime_extra", ctypes.c_uint32),
+        ("i_mtime_extra", ctypes.c_uint32),
+        ("i_atime_extra", ctypes.c_uint32),
+        ("i_crtime", ctypes.c_uint32),
+        ("i_crtime_extra", ctypes.c_uint32),
+        ("i_version_hi", ctypes.c_uint32),
+        ("i_projid", ctypes.c_uint32)
+    ]
+
+    def __init__(self, filesystem):
+        super().__init__()
         self.filesystem = filesystem
-        self._raw_data = raw_entry
+
+    def read_bytes(self, inode_no, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        self._verify_checksums(inode_no, struct_data)
+        return self
+
+    def _verify_checksums(self, inode_no, struct_data):
+        # FIXME, not sure about calculation
+        if self.filesystem.conf.has_flag(Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM):
+            data = bytes(self.filesystem.UUID)
+            if self.filesystem.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_64BIT):
+                data += inode_no.to_bytes(8, 'little')
+            else:
+                data += inode_no.to_bytes(4, 'little')
+            data += struct_data[:0x82] + b"\x00\x00" + struct_data[0x84:]
+            csum = crc32c(data)
+            if (csum & 0xFFFF0000) >> 16 != self.i_checksum_hi:
+                raise FSException(f"Wrong checksum in inode {inode_no}")
+
+    # Some accelerators
 
     def file_type(self):
         file_type = self.i_mode & 0xF000
         try:
             return self.IMode(file_type)
         except ValueError:
-            return file_type
+            raise FSException(f"Unknwon file type {file_type}") from None
 
     # Field types
 
@@ -270,6 +329,35 @@ class Inode:
         S_IFLNK = 0xA000  # Symbolic link
         S_IFSOCK = 0xC000  # Socket
 
+    class IFlags(enum.IntEnum):
+        EXT4_SECRM_FL = 0x1
+        EXT4_UNRM_FL = 0x2
+        EXT4_COMPR_FL = 0x4
+        EXT4_SYNC_FL = 0x8
+        EXT4_IMMUTABLE_FL = 0x10
+        EXT4_APPEND_FL = 0x20
+        EXT4_NODUMP_FL = 0x40
+        EXT4_NOATIME_FL = 0x80
+        EXT4_DIRTY_FL = 0x100
+        EXT4_COMPRBLK_FL = 0x200
+        EXT4_NOCOMPR_FL = 0x400
+        EXT4_ENCRYPT_FL = 0x800
+        EXT4_INDEX_FL = 0x1000
+        EXT4_IMAGIC_FL = 0x2000
+        EXT4_JOURNAL_DATA_FL = 0x4000
+        EXT4_NOTAIL_FL = 0x8000
+        EXT4_DIRSYNC_FL = 0x10000
+        EXT4_TOPDIR_FL = 0x20000
+        EXT4_HUGE_FILE_FL = 0x40000
+        EXT4_EXTENTS_FL = 0x80000
+        EXT4_EA_INODE_FL = 0x200000
+        EXT4_EOFBLOCKS_FL = 0x400000
+        EXT4_SNAPFILE_FL = 0x01000000
+        EXT4_SNAPFILE_DELETED_FL = 0x04000000
+        EXT4_SNAPFILE_SHRUNK_FL = 0x08000000
+        EXT4_INLINE_DATA_FL = 0x10000000
+        EXT4_PROJINHERIT_FL = 0x20000000
+        EXT4_RESERVED_FL = 0x80000000
     # Fields
 
     @property

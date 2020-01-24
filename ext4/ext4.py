@@ -2,7 +2,8 @@ import enum
 import os
 
 from ext4.files import Directory, File
-from .data_structures import Superblock, BlockGroupDescriptor, BlockGroupDescriptor64
+from .data_structures import \
+    Superblock, BlockGroupDescriptor, BlockGroupDescriptor64, Inode
 
 
 class SpecialInode(enum.IntEnum):
@@ -84,8 +85,14 @@ class Filesystem:
     def get_block(self, index, n=1):
         return self._get_bytes(index * self.conf.block_size, n * self.conf.block_size)
 
-    def _get_inode(self, inode_no):
-        raise NotImplementedError
+    def get_inode(self, inode_no) -> Inode:
+        bg_no = (inode_no - 1) // self.conf.s_inodes_per_group
+        bgd = self.get_block_group_desc(bg_no)
+        inode_table_loc = bgd.get_inode_table_loc()  # * self.conf.block_size
+        inode_start = inode_table_loc + self.conf.s_inode_size * ((inode_no - 1) % self.conf.s_inodes_per_group)
+        struct_data = self._get_bytes(inode_start, self.conf.s_inode_size)
+        inode = Inode(self).read_bytes(inode_no, struct_data)
+        return inode
 
     def get_file(self, path) -> File:
         if not path.startswith("/"):
@@ -97,4 +104,4 @@ class Filesystem:
         return cwd.get_file(path)
 
     def get_root_dir(self) -> Directory:
-        return Directory(self, "/", SpecialInode.ROOT_DIRECTORY, self._get_inode(SpecialInode.ROOT_DIRECTORY))
+        return Directory(self, "/", SpecialInode.ROOT_DIRECTORY, self.get_inode(SpecialInode.ROOT_DIRECTORY))
