@@ -2,6 +2,7 @@ import enum
 import os
 
 from .files import Directory, File
+from .data_structures import Superblock
 
 
 # Reference: https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout#Directory_Entries
@@ -26,13 +27,21 @@ class Filesystem:
     def __init__(self, block_device):
         self.block_device = block_device
         self.fd = ...
+        self.conf: Superblock = ...
 
     def __enter__(self):
         self.fd = os.open(self.block_device, os.O_RDONLY)
+        # 1024s hardcoded here, because we do not know anything about the filesystem currently
+        superblock = self._get_bytes(0x400, 1024)
+        self.conf = Superblock().read_bytes(superblock)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         os.close(self.fd)
+
+    @property
+    def UUID(self):
+        return self.conf.s_uuid
 
     def _get_bytes(self, offset, length):
         try:

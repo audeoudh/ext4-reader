@@ -20,3 +20,6 @@ running scripts:
 
 You may compare with output of the real `ls` and `cat` on a mounted file system.
 For the supported features, the output should be the same.
+
+Another script, called `dump.py`, allows raw dump of some structures
+(superblock, block group descriptors,…).  Useful for debugging.
