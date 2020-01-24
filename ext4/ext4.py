@@ -1,11 +1,8 @@
 import enum
 import os
 
-from .files import Directory, File
-from .data_structures import Superblock
-
-
-# Reference: https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout#Directory_Entries
+from ext4.files import Directory, File
+from .data_structures import Superblock, BlockGroupDescriptor, BlockGroupDescriptor64
 
 
 class SpecialInode(enum.IntEnum):
@@ -21,6 +18,34 @@ class SpecialInode(enum.IntEnum):
     EXCLUDE = 9
     REPLICA = 10
     FIRST_NON_REVERSED = 11
+
+
+class BlockGroup:
+    def __init__(self, filesystem, group_number):
+        self.filesystem = filesystem
+        self.group_number = group_number
+        self.desc: BlockGroupDescriptor
+        if self.filesystem.conf.s_feature_incompat & Superblock.FeatureIncompat.INCOMPAT_64BIT == 0:
+            self.desc = BlockGroupDescriptor(self.filesystem) \
+                .read_bytes(self.group_number, self.filesystem.get_block(self._first_block_no() + 1))
+        else:
+            self.desc = BlockGroupDescriptor64(self.filesystem) \
+                .read_bytes(self.group_number, self.filesystem.get_block(self._first_block_no() + 1))
+
+    def _first_block_no(self):
+        return self.group_number * self.filesystem.conf.s_blocks_per_group
+
+    def has_superblock(self):
+        # See https://stackoverflow.com/questions/1804311/how-to-check-if-an-integer-is-a-power-of-3
+        # for power of {3, 5, 7} checks
+        return (self.filesystem.conf.s_feature_ro_compat & Superblock.RO_COMPAT_SPARSE_SUPER) == 0 \
+               or (self.group_number == 0) \
+               or (3**20 % self.group_number == 0) \
+               or (5**13 % self.group_number == 0) \
+               or (7**11 % self.group_number == 0)
+
+    def has_group_descriptors(self):
+        return self.has_superblock()
 
 
 class Filesystem:
@@ -52,6 +77,12 @@ class Filesystem:
             raise ose
         b = os.read(self.fd, length)
         return b
+
+    def get_block_group_desc(self, bg_no):
+        return BlockGroup(self, bg_no).desc
+
+    def get_block(self, index, n=1):
+        return self._get_bytes(index * self.conf.block_size, n * self.conf.block_size)
 
     def _get_inode(self, inode_no):
         raise NotImplementedError

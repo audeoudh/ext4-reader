@@ -1,7 +1,7 @@
 import ctypes
 import enum
 
-from .tools import FSException, crc32c
+from .tools import FSException, crc16, crc32c
 
 
 class Superblock(ctypes.LittleEndianStructure):
@@ -157,6 +157,79 @@ class Superblock(ctypes.LittleEndianStructure):
         INCOMPAT_LARGEDIR = 0x4000
         INCOMPAT_INLINE_DATA = 0x8000
         INCOMPAT_ENCRYPT = 0x10000
+
+
+class BlockGroupDescriptor(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("bg_block_bitmap_lo", ctypes.c_ulong),
+        ("bg_inode_bitmap_lo", ctypes.c_ulong),
+        ("bg_inode_table_lo", ctypes.c_ulong),
+        ("bg_free_blocks_count_lo", ctypes.c_ushort),
+        ("bg_free_inodes_count_lo", ctypes.c_ushort),
+        ("bg_used_dirs_count_lo", ctypes.c_ushort),
+        ("bg_flags", ctypes.c_ushort),
+        ("bg_exclude_bitmap_lo", ctypes.c_ulong),
+        ("bg_block_bitmap_csum_lo", ctypes.c_ushort),
+        ("bg_inode_bitmap_csum_lo", ctypes.c_ushort),
+        ("bg_itable_unused_lo", ctypes.c_ushort),
+        ("bg_checksum", ctypes.c_ushort)
+    ]
+
+    def __init__(self, filesystem):
+        super().__init__()
+        self.filesystem = filesystem
+
+    def read_bytes(self, group_number, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        self._verify_checksums(struct_data)
+        self._verify_checksums(group_number)
+
+    def _verify_checksums(self, group_number):
+        data = self.filesystem.UUID
+        data += group_number.to_bytes(4, 'little')
+        data += bytes(self)[:0x1E]  # FIXME for 64bits structure…
+        if self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM != 0 \
+                and self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_GDT_CSUM == 0:
+            csum = crc32c(data) & 0xFFFF
+        elif self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_GDT_CSUM != 0:
+            csum = crc16(data)
+        else:
+            raise FSException("Unknown checksum method")
+        if csum != self.bg_checksum:
+            raise FSException(f"Wrong checksum in block group descriptor {group_number}")
+
+    # Some accelerators
+
+    def bg_block_bitmap(self):
+        return (self.bg_block_bitmap_hi << 32) + self.bg_block_bitmap_lo
+
+    def bg_inode_bitmap(self):
+        return (self.bg_inode_bitmap_hi << 32) + self.bg_inode_bitmap_lo
+
+    def bg_inode_table(self):
+        if (self.filesystem.conf.s_feature_incompat & self.filesystem.conf.FeatureIncompat.INCOMPAT_64BIT != 0) \
+                and self.filesystem.conf.s_desc_size > 32:
+            return (self.bg_inode_table_hi << 32) + self.bg_inode_table_lo
+        else:
+            return self.bg_inode_table_lo
+
+
+class BlockGroupDescriptor64(BlockGroupDescriptor):
+    _fields_ = BlockGroupDescriptor._fields_ + [
+        ("bg_block_bitmap_hi", ctypes.c_ulong),
+        ("bg_inode_bitmap_hi", ctypes.c_ulong),
+        ("bg_inode_table_hi", ctypes.c_ulong),
+        ("bg_free_blocks_count_hi", ctypes.c_ushort),
+        ("bg_free_inodes_count_hi", ctypes.c_ushort),
+        ("bg_used_dirs_count_hi", ctypes.c_ushort),
+        ("bg_itable_unused_hi", ctypes.c_ushort),
+        ("bg_exclude_bitmap_hi", ctypes.c_ulong),
+        ("bg_block_bitmap_csum_hi", ctypes.c_ushort),
+        ("bg_inode_bitmap_csum_hi", ctypes.c_ushort),
+        ("bg_reserved", ctypes.c_ulong)
+    ]
 
 
 class Inode:

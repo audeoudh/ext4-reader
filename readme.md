@@ -1,5 +1,7 @@
 # Minimalist ext4 implementation in Python
 
+## Goal
+
 This is a test implementation of ext4 in pure-Python, *not* supporting all ext4
 features.  The aim is *not* to write in the ext4 file system, but only to read
 *some* (and not all) structure into it.  The supported features are those
@@ -23,3 +25,16 @@ For the supported features, the output should be the same.
 
 Another script, called `dump.py`, allows raw dump of some structures
 (superblock, block group descriptors,…).  Useful for debugging.
+
+
+## Documentation
+
+Based on the wiki of kernel.org:
+[https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout].  Tested on some real
+ext4 filesystem (e.g. the true root filesystem on which development were done).
+Based on that documentation, we implemented:
+
+- Read the superblock
+  - Checksum is checked (if they are computed in the filesystem!)
+- Read block group descriptors
+  - Checksum is checked

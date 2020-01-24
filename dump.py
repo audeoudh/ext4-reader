@@ -1,6 +1,14 @@
 from ext4 import Filesystem
 
 
+def block_group_descriptor_dump(filesystem, block_group_number):
+    bgd = filesystem.get_block_group_desc(block_group_number)
+    print(f"Block group descriptor {block_group_number} of {filesystem.block_device}:")
+    fn_size = max(len(fn) for fn, _ in bgd._fields_)
+    for field_name, _ in bgd._fields_:
+        print(f"  {field_name:{fn_size}}  {getattr(bgd, field_name)!r}")
+
+
 def superblock_dump(filesystem):
     superblock = filesystem.conf
     print(f"Superblock of {filesystem.block_device}")
@@ -17,6 +25,10 @@ if __name__ == '__main__':
 
     sb_parser = subparsers.add_parser("superblock")
     sb_parser.set_defaults(func=superblock_dump)
+
+    bgd_parser = subparsers.add_parser("block_group_descriptor")
+    bgd_parser.add_argument("block_group_number", type=int)
+    bgd_parser.set_defaults(func=block_group_descriptor_dump)
 
     args = parser.parse_args()
 
