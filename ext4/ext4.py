@@ -21,34 +21,6 @@ class SpecialInode(enum.IntEnum):
     FIRST_NON_REVERSED = 11
 
 
-class BlockGroup:
-    def __init__(self, filesystem, group_number):
-        self.filesystem = filesystem
-        self.group_number = group_number
-        self.desc: BlockGroupDescriptor
-        if self.filesystem.conf.s_feature_incompat & Superblock.FeatureIncompat.INCOMPAT_64BIT == 0:
-            self.desc = BlockGroupDescriptor(self.filesystem) \
-                .read_bytes(self.group_number, self.filesystem.get_block(self._first_block_no() + 1))
-        else:
-            self.desc = BlockGroupDescriptor64(self.filesystem) \
-                .read_bytes(self.group_number, self.filesystem.get_block(self._first_block_no() + 1))
-
-    def _first_block_no(self):
-        return self.group_number * self.filesystem.conf.s_blocks_per_group
-
-    def has_superblock(self):
-        # See https://stackoverflow.com/questions/1804311/how-to-check-if-an-integer-is-a-power-of-3
-        # for power of {3, 5, 7} checks
-        return (self.filesystem.conf.s_feature_ro_compat & Superblock.RO_COMPAT_SPARSE_SUPER) == 0 \
-               or (self.group_number == 0) \
-               or (3**20 % self.group_number == 0) \
-               or (5**13 % self.group_number == 0) \
-               or (7**11 % self.group_number == 0)
-
-    def has_group_descriptors(self):
-        return self.has_superblock()
-
-
 class Filesystem:
     def __init__(self, block_device):
         self.block_device = block_device
@@ -79,16 +51,29 @@ class Filesystem:
         b = os.read(self.fd, length)
         return b
 
-    def get_block_group_desc(self, bg_no):
-        return BlockGroup(self, bg_no).desc
-
     def get_block(self, index, n=1):
         return self._get_bytes(index * self.conf.block_size, n * self.conf.block_size)
+
+    def get_block_group_desc(self, bg_no):
+        # FIXME: What if superblock does not exist?  Or block group descriptors do not exist??
+        if self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_FLEX_BG):
+            groups_per_flex = self.conf.get_groups_per_flex()
+            main_bg_no = bg_no // groups_per_flex * groups_per_flex
+            sec_bg_no = bg_no % groups_per_flex
+        else:
+            main_bg_no = bg_no
+            sec_bg_no = 0
+        if self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_64BIT):
+            klass = BlockGroupDescriptor64
+        else:
+            klass = BlockGroupDescriptor
+        block_no = main_bg_no * self.conf.s_blocks_per_group + sec_bg_no + 1
+        return klass(self).read_bytes(bg_no, self.get_block(block_no))
 
     def get_inode(self, inode_no) -> Inode:
         bg_no = (inode_no - 1) // self.conf.s_inodes_per_group
         bgd = self.get_block_group_desc(bg_no)
-        inode_table_loc = bgd.get_inode_table_loc()  # * self.conf.block_size
+        inode_table_loc = bgd.get_inode_table_loc() * self.conf.block_size
         inode_start = inode_table_loc + self.conf.s_inode_size * ((inode_no - 1) % self.conf.s_inodes_per_group)
         struct_data = self._get_bytes(inode_start, self.conf.s_inode_size)
         inode = Inode(self).read_bytes(inode_no, struct_data)
