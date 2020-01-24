@@ -1,0 +1,2 @@
+class FSException(Exception):
+    pass
