@@ -1,7 +1,7 @@
 import abc
 from typing import Optional
 
-from .data_structures import Inode
+from .data_structures import Inode, ExtentHeader, ExtentIdx, Extent
 from .tools import FSException
 
 
@@ -20,11 +20,12 @@ class File:
         file = file_type_handler(filesystem, path, inode_no, inode)
         return file
 
-    def __init__(self, filesystem, path, inode_no, inode):
+    def __init__(self, filesystem, path, inode_no, inode: Inode):
         self.filesystem = filesystem
         self.path = path
         self.inode_no = inode_no
         self.inode = inode
+        self.content = FileContent(self.filesystem, inode)
 
     @property
     def filename(self):
@@ -42,7 +43,7 @@ class Directory(File):
     __metaclass__ = abc.ABCMeta
 
     def __new__(cls, filesystem, path, inode_no, inode):
-        if inode.i_flags & inode.IFlags.EXT4_INDEX_FL != 0:
+        if inode.i_flags & inode.Flags.INDEX != 0:
             return HashTreeDirectory(filesystem, path, inode_no, inode)
         else:
             return LinearDirectory(filesystem, path, inode_no, inode)
@@ -110,6 +111,66 @@ class HashTreeDirectory(Directory):
 
 
 inode_file_type_handlers = {
-    Inode.IMode.S_IFDIR: Directory,
-    Inode.IMode.S_IFREG: RegularFile,
+    Inode.Mode.IFDIR: Directory,
+    Inode.Mode.IFREG: RegularFile,
 }
+
+
+class FileContent:
+    __metaclass__ = abc.ABCMeta
+
+    def __new__(cls, filesystem, inode: Inode):
+        if cls is FileContent:
+            # Build a subclass of this abstract class
+            if inode.i_flags & inode.Flags.EXTENTS != 0:
+                return ExtentTreeFileContent.__new__(ExtentTreeFileContent, filesystem, inode)
+            elif inode.i_flags & inode.Flags.INLINE_DATA != 0:
+                raise NotImplementedError("Inline data are not supported")
+            else:
+                return DirectIndirectFileContent.__new__(DirectIndirectFileContent, filesystem, inode)
+        else:
+            # Instanciating a subclass, OK.
+            return super().__new__(cls)
+
+    def __init__(self, filesystem, inode: Inode):
+        self.filesystem = filesystem
+        self.inode = inode
+
+    @abc.abstractmethod
+    def get_blocks_no(self) -> Iterator[int]:
+        raise NotImplementedError
+
+
+class DirectIndirectFileContent(FileContent):
+    def get_blocks_no(self):
+        for offset in range(12):
+            block_address = int.from_bytes(bytes(self.inode.i_block)[offset * 4:(offset + 1) * 4], 'little')
+            if block_address == 0:
+                break
+            else:
+                yield block_address
+        else:
+            raise NotImplementedError("Indirect block addressing is not supported")
+
+
+class ExtentTreeFileContent(FileContent):
+    def __init__(self, filesystem, inode, strict=True):
+        super().__init__(filesystem, inode)
+        if strict:
+            ExtentHeader().read_bytes(self.inode.i_block, strict=strict)
+
+    def get_blocks_no(self):
+        header = ExtentHeader().read_bytes(self.inode.i_block)
+        if header.eh_depth != 0:
+            # Index block locations are here
+            idx_blocks = (ExtentIdx(self.inode.i_block[i * 12:(i + 1) * 12]) for i in range(header.eh_entries))
+            raise NotImplementedError("Deep extent trees are not supported")
+        else:
+            # Data block locations are here
+            for i in range(header.eh_entries):
+                ee = Extent().read_bytes(bytes(self.inode.i_block)[(i + 1) * 12:(i + 2) * 12])
+                if ee.ee_len > 32768:
+                    raise NotImplementedError("Uninitialized extents are not supported")
+                start = ee.get_start()
+                for i_block in range(ee.ee_len):
+                    yield start + i_block

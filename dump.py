@@ -2,6 +2,7 @@ import ctypes
 
 import ext4.tools
 from ext4 import Filesystem
+from ext4.files import FileContent
 
 
 def _raw_dump(filesystem, blob, offset=0):
@@ -67,22 +68,40 @@ def block_group_descriptor_dump(filesystem, block_group_no):
     bgd = filesystem.get_block_group_desc(block_group_no)
     print(f"Block group descriptor {bgd.no} of {filesystem.block_device} (@{bgd.pos}):")
     try:
-        bgd._verify_checksums(block_group_no)
+        bgd._verify_checksums()
         cksum = True
     except ext4.tools.FSException:
         cksum = False
     flags = _collect_flags(bgd.bg_flags, bgd.Flags)
     _dump_struct(bgd,
-                 bg_checksum=("ok" if cksum else "KO!"),
+                 bg_checksum=("valid" if cksum else "INVALID"),
                  bg_flags=flags)
     print("Raw data:")
-    _raw_dump(filesystem, bgd, offset=filesystem._get_block_group_desc_pos(block_group_no))
+    _raw_dump(filesystem, bgd, offset=bgd.pos)
 
 
 def inode_dump(filesystem, inode_no):
     inode = filesystem.get_inode(inode_no)
-    print(f"Inode {inode.no} of {filesystem.block_device} (@{inode.pos}):")
-    _dump_struct(inode)
+    print(f"Inode {inode.no} of {filesystem.block_device} (@{inode.pos}, #{inode.pos // 4096:04X}:{inode.pos % 4096:04X}):")
+    try:
+        inode._verify_checksums()
+        cksum = True
+    except ext4.tools.FSException:
+        cksum = False
+    mode = _collect_flags(inode.i_mode, list(inode.Mode)[:12])
+    for ft in list(inode.Mode)[12:]:
+        if (inode.i_mode & 0xF000) == ft:
+            mode += f"|{ft.name}"
+    _dump_struct(inode,
+                 i_checksum_hi=("valid" if cksum else "INVALID"),
+                 i_mode=mode)
+
+
+def inode_content_dump(filesystem, inode_no):
+    inode = filesystem.get_inode(inode_no)
+    file_content = FileContent(filesystem, inode)
+    print(f"Inode {inode.no} of {filesystem.block_device}'s content block numbers: "
+          f"[{', '.join(map(str, file_content.get_blocks_no()))}]")
 
 
 def block_dump(filesystem, block_no):
@@ -108,6 +127,10 @@ if __name__ == '__main__':
     inode_parser = subparsers.add_parser("inode")
     inode_parser.add_argument("inode_no", metavar="inode_number", type=int)
     inode_parser.set_defaults(func=inode_dump)
+
+    inode_content_parser = subparsers.add_parser("inode_content")
+    inode_content_parser.add_argument("inode_no", metavar="inode_number", type=int)
+    inode_content_parser.set_defaults(func=inode_content_dump)
 
     block_parser = subparsers.add_parser("block")
     block_parser.add_argument("block_no", metavar="block_number", type=int)

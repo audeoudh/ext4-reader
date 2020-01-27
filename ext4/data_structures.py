@@ -306,10 +306,10 @@ class Inode(ctypes.LittleEndianStructure):
         fit = min(len(struct_data), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
         if strict:
-            self._verify_checksums(struct_data)
+            self._verify_checksums()
         return self
 
-    def _verify_checksums(self, struct_data):
+    def _verify_checksums(self):
         # FIXME, not sure about calculation
         if self.filesystem.conf.has_flag(Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM):
             data = bytes(self.filesystem.UUID)
@@ -317,6 +317,7 @@ class Inode(ctypes.LittleEndianStructure):
                 data += self.no.to_bytes(8, 'little')
             else:
                 data += self.no.to_bytes(4, 'little')
+            struct_data = bytes(self)
             data += struct_data[:0x82] + b"\x00\x00" + struct_data[0x84:]
             csum = crc32c(data)
             if (csum & 0xFFFF0000) >> 16 != self.i_checksum_hi:
@@ -327,65 +328,123 @@ class Inode(ctypes.LittleEndianStructure):
     def file_type(self):
         file_type = self.i_mode & 0xF000
         try:
-            return self.IMode(file_type)
+            return self.Mode(file_type)
         except ValueError:
             raise FSException(f"Unknwon file type {file_type}") from None
 
     # Field types
 
-    class IMode(enum.IntEnum):
+    class Mode(enum.IntEnum):
         # File mode
-        S_IXOTH = 0x1  # Others may execute
-        S_IWOTH = 0x2  # Others may write
-        S_IROTH = 0x4  # Others may read
-        S_IXGRP = 0x8  # Group members may execute
-        S_IWGRP = 0x10  # Group members may write
-        S_IRGRP = 0x20  # Group members may read
-        S_IXUSR = 0x40  # Owner may execute
-        S_IWUSR = 0x80  # Owner may write
-        S_IRUSR = 0x100  # Owner may read
-        S_ISVTX = 0x200  # Sticky bit
-        S_ISGID = 0x400  # Set GID
-        S_ISUID = 0x800  # Set UID
+        IXOTH = 0x1  # Others may execute
+        IWOTH = 0x2  # Others may write
+        IROTH = 0x4  # Others may read
+        IXGRP = 0x8  # Group members may execute
+        IWGRP = 0x10  # Group members may write
+        IRGRP = 0x20  # Group members may read
+        IXUSR = 0x40  # Owner may execute
+        IWUSR = 0x80  # Owner may write
+        IRUSR = 0x100  # Owner may read
+        ISVTX = 0x200  # Sticky bit
+        ISGID = 0x400  # Set GID
+        ISUID = 0x800  # Set UID
 
         # These are mutually-exclusive file types:
-        S_IFIFO = 0x1000  # FIFO
-        S_IFCHR = 0x2000  # Character device
-        S_IFDIR = 0x4000  # Directory
-        S_IFBLK = 0x6000  # Block device
-        S_IFREG = 0x8000  # Regular file
-        S_IFLNK = 0xA000  # Symbolic link
-        S_IFSOCK = 0xC000  # Socket
+        IFIFO = 0x1000  # FIFO
+        IFCHR = 0x2000  # Character device
+        IFDIR = 0x4000  # Directory
+        IFBLK = 0x6000  # Block device
+        IFREG = 0x8000  # Regular file
+        IFLNK = 0xA000  # Symbolic link
+        IFSOCK = 0xC000  # Socket
 
-    class IFlags(enum.IntEnum):
-        EXT4_SECRM_FL = 0x1
-        EXT4_UNRM_FL = 0x2
-        EXT4_COMPR_FL = 0x4
-        EXT4_SYNC_FL = 0x8
-        EXT4_IMMUTABLE_FL = 0x10
-        EXT4_APPEND_FL = 0x20
-        EXT4_NODUMP_FL = 0x40
-        EXT4_NOATIME_FL = 0x80
-        EXT4_DIRTY_FL = 0x100
-        EXT4_COMPRBLK_FL = 0x200
-        EXT4_NOCOMPR_FL = 0x400
-        EXT4_ENCRYPT_FL = 0x800
-        EXT4_INDEX_FL = 0x1000
-        EXT4_IMAGIC_FL = 0x2000
-        EXT4_JOURNAL_DATA_FL = 0x4000
-        EXT4_NOTAIL_FL = 0x8000
-        EXT4_DIRSYNC_FL = 0x10000
-        EXT4_TOPDIR_FL = 0x20000
-        EXT4_HUGE_FILE_FL = 0x40000
-        EXT4_EXTENTS_FL = 0x80000
-        EXT4_EA_INODE_FL = 0x200000
-        EXT4_EOFBLOCKS_FL = 0x400000
-        EXT4_SNAPFILE_FL = 0x01000000
-        EXT4_SNAPFILE_DELETED_FL = 0x04000000
-        EXT4_SNAPFILE_SHRUNK_FL = 0x08000000
-        EXT4_INLINE_DATA_FL = 0x10000000
-        EXT4_PROJINHERIT_FL = 0x20000000
-        EXT4_RESERVED_FL = 0x80000000
+    class Flags(enum.IntEnum):
+        SECRM = 0x1
+        UNRM = 0x2
+        COMPR = 0x4
+        SYNC = 0x8
+        IMMUTABLE = 0x10
+        APPEND = 0x20
+        NODUMP = 0x40
+        NOATIME = 0x80
+        DIRTY = 0x100
+        COMPRBLK = 0x200
+        NOCOMPR = 0x400
+        ENCRYPT = 0x800
+        INDEX = 0x1000
+        IMAGIC = 0x2000
+        JOURNAL_DATA = 0x4000
+        NOTAIL = 0x8000
+        DIRSYNC = 0x10000
+        TOPDIR = 0x20000
+        HUGE_FILE = 0x40000
+        EXTENTS = 0x80000
+        EA_INODE = 0x200000
+        EOFBLOCKS = 0x400000
+        SNAPFILE = 0x01000000
+        SNAPFILE_DELETED = 0x04000000
+        SNAPFILE_SHRUNK = 0x08000000
+        INLINE_DATA = 0x10000000
+        PROJINHERIT = 0x20000000
+        RESERVED = 0x80000000
+
+
+class ExtentHeader(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("eh_magic", ctypes.c_uint16),
+        ("eh_entries", ctypes.c_uint16),
+        ("eh_max", ctypes.c_uint16),
+        ("eh_depth", ctypes.c_uint16),
+        ("eh_generation", ctypes.c_uint32)
+    ]
+
+    def read_bytes(self, struct_data, strict=True):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        if strict and not self.magic_is_valid():
+            raise FSException("Magic is not valid in extent tree header")
+        return self
+
+    # Accelerators
+
+    def magic_is_valid(self):
+        return self.eh_magic == 0xF30A
+
+
+class ExtentIdx(ctypes.LittleEndianStructure):
+    """Internal nodes of the extent tree."""
+    _pack_ = 1
+    _fields_ = [
+        ("ei_block", ctypes.c_uint32),
+        ("ei_leaf_lo", ctypes.c_uint32),
+        ("ee_leaf_hi", ctypes.c_uint16),
+        ("ee_unused", ctypes.c_uint16),
+    ]
+
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        return self
+
+
+class Extent(ctypes.LittleEndianStructure):
+    """Leaf nodes of the extent tree."""
+    _pack_ = 1
+    _fields_ = [
+        ("ee_block", ctypes.c_uint32),
+        ("ee_len", ctypes.c_uint16),
+        ("ee_start_hi", ctypes.c_uint16),
+        ("ee_start_lo", ctypes.c_uint32),
+    ]
+
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        return self
+
+    def get_start(self):
+        return (self.ee_start_hi << 32) | self.ee_start_lo
     # Fields
 
     @property

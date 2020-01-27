@@ -84,7 +84,7 @@ class Filesystem:
         bg_no = (inode_no - 1) // self.conf.s_inodes_per_group
         bgd = self.get_block_group_desc(bg_no, strict=strict)
         inode_index = (inode_no - 1) % self.conf.s_inodes_per_group
-        inode_pos = bgd.get_inode_table_loc() + self.conf.s_inode_size * inode_index
+        inode_pos = bgd.get_inode_table_loc() * self.conf.get_block_size() + self.conf.s_inode_size * inode_index
         # Retrieve and parse data
         struct_data = self.get_bytes(inode_pos, self.conf.s_inode_size)
         inode = Inode(self, inode_no, inode_pos).read_bytes(struct_data, strict=strict)

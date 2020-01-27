@@ -38,3 +38,7 @@ were done).  Based on that documentation, we implemented:
   - Checksum is checked (if they are computed in the filesystem!)
 - Read block group descriptors
   - Checksum is checked
+- Read inode table
+- Read file content
+  - direct block addressing
+  - extent tree of depth 1
