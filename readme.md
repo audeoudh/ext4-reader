@@ -30,9 +30,9 @@ Another script, called `dump.py`, allows raw dump of some structures
 ## Documentation
 
 Based on the wiki of kernel.org:
-[https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout].  Tested on some real
-ext4 filesystem (e.g. the true root filesystem on which development were done).
-Based on that documentation, we implemented:
+[https://www.kernel.org/doc/html/latest/filesystems/ext4/index.html].  Tested on
+some real ext4 filesystem (e.g. the true root filesystem on which development
+were done).  Based on that documentation, we implemented:
 
 - Read the superblock
   - Checksum is checked (if they are computed in the filesystem!)

@@ -104,10 +104,11 @@ class Superblock(ctypes.LittleEndianStructure):
         ("s_checksum", ctypes.c_uint32),
     ]
 
-    def read_bytes(self, struct_data):
+    def read_bytes(self, struct_data, strict=True):
         fit = min(len(struct_data), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
-        self._verify_checksums(struct_data)
+        if strict:
+            self._verify_checksums(struct_data)
         return self
 
     def _verify_checksums(self, struct_data):
@@ -119,9 +120,14 @@ class Superblock(ctypes.LittleEndianStructure):
 
     # Some accelerators
 
-    @property
-    def block_size(self):
+    def get_block_size(self):
         return 2 ** (10 + self.s_log_block_size)
+
+    def get_groups_per_flex(self):
+        return 2 ** self.s_log_groups_per_flex
+
+    def get_volume_name(self):
+        return self.s_volume_name.decode('utf-8')
 
     def has_flag(self, flag):
         if isinstance(flag, self.FeatureIncompat):
@@ -184,19 +190,22 @@ class BlockGroupDescriptor(ctypes.LittleEndianStructure):
         ("bg_checksum", ctypes.c_uint16)
     ]
 
-    def __init__(self, filesystem):
+    def __init__(self, filesystem, bg_no, bgd_pos):
         super().__init__()
         self.filesystem = filesystem
+        self.no = bg_no
+        self.pos = bgd_pos
 
-    def read_bytes(self, group_number, struct_data):
+    def read_bytes(self, struct_data, strict=True):
         fit = min(len(struct_data), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
-        self._verify_checksums(group_number)
+        if strict:
+            self._verify_checksums()
         return self
 
-    def _verify_checksums(self, group_number):
+    def _verify_checksums(self):
         data = bytes(self.filesystem.UUID)
-        data += group_number.to_bytes(4, 'little')
+        data += self.no.to_bytes(4, 'little')
         data += bytes(self)[:0x1E]  # FIXME for 64bits structure…
         if self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM != 0 \
                 and self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_GDT_CSUM == 0:
@@ -206,18 +215,28 @@ class BlockGroupDescriptor(ctypes.LittleEndianStructure):
         else:
             raise FSException("Unknown checksum method")
         if csum != self.bg_checksum:
-            raise FSException(f"Wrong checksum in block group descriptor {group_number}")
+            raise FSException(f"Wrong checksum in block group descriptor {self.no}")
 
     # Some accelerators
 
-    def bg_block_bitmap(self):
-        return (self.bg_block_bitmap_hi << 32) + self.bg_block_bitmap_lo
+    def get_bg_block_bitmap_loc(self):
+        return self.bg_block_bitmap_lo
 
-    def bg_inode_bitmap(self):
-        return (self.bg_inode_bitmap_hi << 32) + self.bg_inode_bitmap_lo
+    def get_bg_inode_bitmap_loc(self):
+        return self.bg_inode_bitmap_lo
 
     def get_inode_table_loc(self):
         return self.bg_inode_table_lo
+
+    def has_flag(self, flag):
+        return self.bg_flags & flag != 0
+
+    # Field types
+
+    class Flags(enum.IntEnum):
+        INODE_UNINIT = 0x1
+        BLOCK_UNINIT = 0x2
+        INODE_ZEROED = 0x4
 
 
 class BlockGroupDescriptor64(BlockGroupDescriptor):
@@ -235,8 +254,14 @@ class BlockGroupDescriptor64(BlockGroupDescriptor):
         ("bg_reserved", ctypes.c_uint32)
     ]
 
+    def get_bg_block_bitmap_loc(self):
+        return (self.bg_block_bitmap_hi << 32) + self.bg_block_bitmap_lo * self.filesystem.conf.get_block_size()
+
+    def get_bg_inode_bitmap_loc(self):
+        return (self.bg_inode_bitmap_hi << 32) + self.bg_inode_bitmap_lo * self.filesystem.conf.get_block_size()
+
     def get_inode_table_loc(self):
-        return (self.bg_inode_table_hi << 32) + self.bg_inode_table_lo
+        return (self.bg_inode_table_hi << 32) + self.bg_inode_table_lo * self.filesystem.conf.get_block_size()
 
 
 class Inode(ctypes.LittleEndianStructure):
@@ -254,7 +279,7 @@ class Inode(ctypes.LittleEndianStructure):
         ("i_blocks_lo", ctypes.c_uint32),
         ("i_flags", ctypes.c_uint32),
         ("i_osd1", ctypes.c_uint8 * 4),
-        ("i_block", ctypes.c_uint8 * 60),
+        ("i_block", ctypes.c_uint32 * 15),
         ("i_generation", ctypes.c_uint32),
         ("i_file_acl_lo", ctypes.c_uint32),
         ("i_size_high", ctypes.c_uint32),  # i_dir_acl in ext2/3
@@ -271,28 +296,31 @@ class Inode(ctypes.LittleEndianStructure):
         ("i_projid", ctypes.c_uint32)
     ]
 
-    def __init__(self, filesystem):
+    def __init__(self, filesystem, inode_no, position):
         super().__init__()
         self.filesystem = filesystem
+        self.no = inode_no
+        self.pos = position
 
-    def read_bytes(self, inode_no, struct_data):
+    def read_bytes(self, struct_data, strict=True):
         fit = min(len(struct_data), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
-        self._verify_checksums(inode_no, struct_data)
+        if strict:
+            self._verify_checksums(struct_data)
         return self
 
-    def _verify_checksums(self, inode_no, struct_data):
+    def _verify_checksums(self, struct_data):
         # FIXME, not sure about calculation
         if self.filesystem.conf.has_flag(Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM):
             data = bytes(self.filesystem.UUID)
             if self.filesystem.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_64BIT):
-                data += inode_no.to_bytes(8, 'little')
+                data += self.no.to_bytes(8, 'little')
             else:
-                data += inode_no.to_bytes(4, 'little')
+                data += self.no.to_bytes(4, 'little')
             data += struct_data[:0x82] + b"\x00\x00" + struct_data[0x84:]
             csum = crc32c(data)
             if (csum & 0xFFFF0000) >> 16 != self.i_checksum_hi:
-                raise FSException(f"Wrong checksum in inode {inode_no}")
+                raise FSException(f"Wrong checksum in inode {self.no}")
 
     # Some accelerators
 

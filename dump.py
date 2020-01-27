@@ -1,13 +1,17 @@
 import ctypes
 
+import ext4.tools
 from ext4 import Filesystem
 
 
-def raw_dump(blob):
+def _raw_dump(filesystem, blob, offset=0):
     raw_data = bytes(blob)
     l = len(raw_data)
     for i in range((l + 1) // 16):
-        print("    0x%02x   " % i, end="")
+        pos = offset + (i * 16)
+        block_no = pos // filesystem.conf.get_block_size()
+        offset_in_block = pos % filesystem.conf.get_block_size()
+        print(f"@{block_no:04X}:{offset_in_block:04X}  ", end="")
         for j in range(2):
             for k in range(8):
                 print(" %02x" % raw_data[i * 16 + j * 8 + k], end="")
@@ -15,37 +19,76 @@ def raw_dump(blob):
         print("")
 
 
-def dump_struct(struct):
-    raw_dump(struct)
-    fn_size = max(len(fn) for fn, _ in struct._fields_)
+def _dump_struct(struct, **comments):
+    lines = []
     for field_name, type_ in struct._fields_:
         value = getattr(struct, field_name)
-        print(f"  {field_name:{fn_size}}[{ctypes.sizeof(type_)}]  {value!r}")
+        if isinstance(value, int):
+            fshex = ctypes.sizeof(type_) * 2
+            value_str = f"0x{value:0{fshex}X}"
+        else:  # Array
+            fshex = ctypes.sizeof(value._type_) * 2
+            value_str = " ".join(f"{v:0{fshex}X}" for v in value)
+            if len(value_str) > 20:
+                value_str = value_str[:13] + "..." + value_str[-4:]
+        try:
+            comment = comments[field_name]
+        except LookupError:
+            comment = ""
+        lines.append((field_name, value_str, comment))
+    c1s, c2s, c3s = (max(map(len, col)) for col in zip(*lines))
+    for c1, c2, c3 in lines:
+        print("{c1:{c1s}} {c2:>{c2s}} {c3}".format(c1=c1, c2=c2, c3=c3, c1s=c1s, c2s=c2s))
+
+
+def _collect_flags(value, flag_list):
+    enabled_flags = []
+    for flag in flag_list:
+        if value & flag != 0:
+            enabled_flags.append(flag.name)
+    return "|".join(enabled_flags)
 
 
 def superblock_dump(filesystem):
     superblock = filesystem.conf
     print(f"Superblock of {filesystem.block_device}")
-    dump_struct(superblock)
+    ro_compat_flags = _collect_flags(superblock.s_feature_ro_compat, superblock.FeatureRoCompat)
+    incompat_flags = _collect_flags(superblock.s_feature_incompat, superblock.FeatureIncompat)
+    _dump_struct(superblock,
+                 s_freature_ro_compat=ro_compat_flags,
+                 s_feature_incompat=incompat_flags,
+                 s_volume_name="\"" + superblock.get_volume_name() + "\"")
+    print("Raw data:")
+    _raw_dump(filesystem, superblock)
 
 
 def block_group_descriptor_dump(filesystem, block_group_no):
     bgd = filesystem.get_block_group_desc(block_group_no)
-    print(f"Block group descriptor {block_group_no} of {filesystem.block_device}:")
-    print(repr(bytes(bgd)))
-    dump_struct(bgd)
+    print(f"Block group descriptor {bgd.no} of {filesystem.block_device} (@{bgd.pos}):")
+    try:
+        bgd._verify_checksums(block_group_no)
+        cksum = True
+    except ext4.tools.FSException:
+        cksum = False
+    flags = _collect_flags(bgd.bg_flags, bgd.Flags)
+    _dump_struct(bgd,
+                 bg_checksum=("ok" if cksum else "KO!"),
+                 bg_flags=flags)
+    print("Raw data:")
+    _raw_dump(filesystem, bgd, offset=filesystem._get_block_group_desc_pos(block_group_no))
 
 
 def inode_dump(filesystem, inode_no):
     inode = filesystem.get_inode(inode_no)
-    print(f"Inode {inode_no} of {filesystem.block_device}:")
-    dump_struct(inode)
+    print(f"Inode {inode.no} of {filesystem.block_device} (@{inode.pos}):")
+    _dump_struct(inode)
 
 
 def block_dump(filesystem, block_no):
     block = filesystem.get_block(block_no)
-    print(f"Block number {block_no} of {filesystem.block_device}:")
-    raw_dump(block)
+    pos = block_no * filesystem.conf.get_block_size()
+    print(f"Block number {block_no} of {filesystem.block_device} (@{pos}):")
+    _raw_dump(filesystem, block, offset=pos)
 
 
 if __name__ == '__main__':

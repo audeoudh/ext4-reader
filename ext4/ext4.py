@@ -30,7 +30,7 @@ class Filesystem:
     def __enter__(self):
         self.fd = os.open(self.block_device, os.O_RDONLY)
         # 1024s hardcoded here, because we do not know anything about the filesystem currently
-        superblock = self._get_bytes(0x400, 1024)
+        superblock = self.get_bytes(0x400, 1024)
         self.conf = Superblock().read_bytes(superblock)
         return self
 
@@ -41,7 +41,7 @@ class Filesystem:
     def UUID(self):
         return self.conf.s_uuid
 
-    def _get_bytes(self, offset, length):
+    def get_bytes(self, offset, length):
         try:
             os.lseek(self.fd, offset, os.SEEK_SET)
         except OSError as ose:
@@ -52,31 +52,42 @@ class Filesystem:
         return b
 
     def get_block(self, index, n=1):
-        return self._get_bytes(index * self.conf.block_size, n * self.conf.block_size)
+        return self.get_bytes(index * self.conf.get_block_size(), n * self.conf.get_block_size())
 
-    def get_block_group_desc(self, bg_no):
+    def get_block_group_desc(self, bg_no, strict=True) -> BlockGroupDescriptor:
+        # Compute block group position
         # FIXME: What if superblock does not exist?  Or block group descriptors do not exist??
         if self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_FLEX_BG):
             groups_per_flex = self.conf.get_groups_per_flex()
             main_bg_no = bg_no // groups_per_flex * groups_per_flex
-            sec_bg_no = bg_no % groups_per_flex
+            index_in_flex = bg_no % groups_per_flex
+            if self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_64BIT):
+                index_in_flex = 64 * index_in_flex
+            else:
+                index_in_flex = 32 * index_in_flex
+            superblock_size = self.conf.get_block_size()
+            bgd_pos = main_bg_no * self.conf.s_blocks_per_group \
+                   + superblock_size + index_in_flex
         else:
-            main_bg_no = bg_no
-            sec_bg_no = 0
+            superblock_size = self.conf.get_block_size()
+            bgd_pos = bg_no * self.conf.s_blocks_per_group + superblock_size
+        # Retrieve and parse data
         if self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_64BIT):
-            klass = BlockGroupDescriptor64
+            return BlockGroupDescriptor64(self, bg_no, bgd_pos) \
+                .read_bytes(self.get_bytes(bgd_pos, 64), strict=strict)
         else:
-            klass = BlockGroupDescriptor
-        block_no = main_bg_no * self.conf.s_blocks_per_group + sec_bg_no + 1
-        return klass(self).read_bytes(bg_no, self.get_block(block_no))
+            return BlockGroupDescriptor(self, bg_no, bgd_pos) \
+                .read_bytes(self.get_bytes(bgd_pos, 32), strict=strict)
 
-    def get_inode(self, inode_no) -> Inode:
+    def get_inode(self, inode_no, strict=True) -> Inode:
+        # Compute inode position
         bg_no = (inode_no - 1) // self.conf.s_inodes_per_group
-        bgd = self.get_block_group_desc(bg_no)
-        inode_table_loc = bgd.get_inode_table_loc() * self.conf.block_size
-        inode_start = inode_table_loc + self.conf.s_inode_size * ((inode_no - 1) % self.conf.s_inodes_per_group)
-        struct_data = self._get_bytes(inode_start, self.conf.s_inode_size)
-        inode = Inode(self).read_bytes(inode_no, struct_data)
+        bgd = self.get_block_group_desc(bg_no, strict=strict)
+        inode_index = (inode_no - 1) % self.conf.s_inodes_per_group
+        inode_pos = bgd.get_inode_table_loc() + self.conf.s_inode_size * inode_index
+        # Retrieve and parse data
+        struct_data = self.get_bytes(inode_pos, self.conf.s_inode_size)
+        inode = Inode(self, inode_no, inode_pos).read_bytes(struct_data, strict=strict)
         return inode
 
     def get_file(self, path) -> File:
