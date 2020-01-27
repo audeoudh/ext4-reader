@@ -40,8 +40,8 @@ class Superblock(ctypes.LittleEndianStructure):
         ("s_feature_incompat", ctypes.c_uint32),
         ("s_feature_ro_compat", ctypes.c_uint32),
         ("s_uuid", ctypes.c_uint8 * 16),
-        ("s_volume_name", ctypes.c_char * 16),
-        ("s_last_mounted", ctypes.c_char * 64),
+        ("s_volume_name", ctypes.c_ubyte * 16),
+        ("s_last_mounted", ctypes.c_ubyte * 64),
         ("s_algorithm_usage_bitmap", ctypes.c_uint32),
 
         ("s_prealloc_blocks", ctypes.c_uint8),
@@ -127,7 +127,7 @@ class Superblock(ctypes.LittleEndianStructure):
         return 2 ** self.s_log_groups_per_flex
 
     def get_volume_name(self):
-        return self.s_volume_name.decode('utf-8')
+        return bytes(self.s_volume_name).decode('utf-8')
 
     def has_flag(self, flag):
         if isinstance(flag, self.FeatureIncompat):

@@ -11,7 +11,7 @@ def _raw_dump(filesystem, blob, offset=0):
         pos = offset + (i * 16)
         block_no = pos // filesystem.conf.get_block_size()
         offset_in_block = pos % filesystem.conf.get_block_size()
-        print(f"@{block_no:04X}:{offset_in_block:04X}  ", end="")
+        print(f"#{block_no:04X}:{offset_in_block:04X}  ", end="")
         for j in range(2):
             for k in range(8):
                 print(" %02x" % raw_data[i * 16 + j * 8 + k], end="")
@@ -21,21 +21,22 @@ def _raw_dump(filesystem, blob, offset=0):
 
 def _dump_struct(struct, **comments):
     lines = []
-    for field_name, type_ in struct._fields_:
-        value = getattr(struct, field_name)
-        if isinstance(value, int):
-            fshex = ctypes.sizeof(type_) * 2
-            value_str = f"0x{value:0{fshex}X}"
-        else:  # Array
-            fshex = ctypes.sizeof(value._type_) * 2
+    for name, type_ in struct._fields_:
+        field = getattr(struct.__class__, name)
+        value = getattr(struct, name)
+        if issubclass(type_, ctypes.Array):
+            fshex = field.size // len(value) * 2
             value_str = " ".join(f"{v:0{fshex}X}" for v in value)
             if len(value_str) > 20:
                 value_str = value_str[:13] + "..." + value_str[-4:]
+        else:
+            fshex = field.size * 2
+            value_str = f"0x{value:0{fshex}X}"
         try:
-            comment = comments[field_name]
+            comment = comments[name]
         except LookupError:
             comment = ""
-        lines.append((field_name, value_str, comment))
+        lines.append((name, value_str, comment))
     c1s, c2s, c3s = (max(map(len, col)) for col in zip(*lines))
     for c1, c2, c3 in lines:
         print("{c1:{c1s}} {c2:>{c2s}} {c3}".format(c1=c1, c2=c2, c3=c3, c1s=c1s, c2s=c2s))
