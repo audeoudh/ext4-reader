@@ -51,6 +51,15 @@ class Filesystem:
         b = os.read(self.fd, length)
         return b
 
+    def has_superblock(self, bg_no):
+        # See https://stackoverflow.com/questions/1804311/how-to-check-if-an-integer-is-a-power-of-3
+        # for power of {3, 5, 7} checks
+        return (not self.conf.has_flag(Superblock.FeatureRoCompat.RO_COMPAT_SPARSE_SUPER)) \
+               or (bg_no == 0) \
+               or (3 ** 20 % bg_no == 0) \
+               or (5 ** 13 % bg_no == 0) \
+               or (7 ** 11 % bg_no == 0)
+
     def get_block(self, index, n=1):
         return self.get_bytes(index * self.conf.get_block_size(), n * self.conf.get_block_size())
 
@@ -68,7 +77,7 @@ class Filesystem:
             groups_per_flex = self.conf.get_groups_per_flex()
             index_in_flex = bg_no % groups_per_flex
             main_bg_no = bg_no - index_in_flex
-            superblock_size = 1 if main_bg_no == 0 else 0
+            superblock_size = 1 if self.has_superblock(main_bg_no) else 0
             block_no = main_bg_no * self.conf.s_blocks_per_group + superblock_size + (index_in_flex // bgd_per_block)
             offset_in_block = index_in_flex % bgd_per_block * bgd_size
         else:
