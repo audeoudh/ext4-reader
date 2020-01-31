@@ -56,21 +56,25 @@ class Filesystem:
 
     def get_block_group_desc(self, bg_no, strict=True) -> BlockGroupDescriptor:
         # Compute block group position
-        # FIXME: What if superblock does not exist?  Or block group descriptors do not exist??
-        if self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_FLEX_BG):
+        bgd_size = self.conf.s_desc_size if self.conf.has_flag(self.conf.FeatureIncompat.INCOMPAT_64BIT) else 32
+        bgd_per_block = self.conf.get_block_size() // bgd_size
+        if self.conf.has_flag(Superblock.FeatureRoCompat.RO_COMPAT_SPARSE_SUPER):
+            # All block groups descriptors are in block group 0
+            superblock_size = 1
+            block_no = superblock_size + (bg_no // bgd_per_block)
+            offset_in_block = bg_no % bgd_per_block * bgd_size
+        elif self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_FLEX_BG):
+            # Block group descriptors are in first block group of the flex
             groups_per_flex = self.conf.get_groups_per_flex()
-            main_bg_no = bg_no // groups_per_flex * groups_per_flex
             index_in_flex = bg_no % groups_per_flex
-            if self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_64BIT):
-                index_in_flex = 64 * index_in_flex
-            else:
-                index_in_flex = 32 * index_in_flex
-            superblock_size = self.conf.get_block_size()
-            bgd_pos = main_bg_no * self.conf.s_blocks_per_group \
-                   + superblock_size + index_in_flex
+            main_bg_no = bg_no - index_in_flex
+            superblock_size = 1 if main_bg_no == 0 else 0
+            block_no = main_bg_no * self.conf.s_blocks_per_group + superblock_size + (index_in_flex // bgd_per_block)
+            offset_in_block = index_in_flex % bgd_per_block * bgd_size
         else:
-            superblock_size = self.conf.get_block_size()
-            bgd_pos = bg_no * self.conf.s_blocks_per_group + superblock_size
+            # FIXME where are block descriptors in this situation?
+            raise NotImplementedError
+        bgd_pos = block_no * self.conf.get_block_size() + offset_in_block
         # Retrieve and parse data
         if self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_64BIT):
             return BlockGroupDescriptor64(self, bg_no, bgd_pos) \
