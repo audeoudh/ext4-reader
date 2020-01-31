@@ -1,5 +1,5 @@
 import abc
-from typing import Optional
+from typing import Optional, Iterator
 
 from .data_structures import Inode, ExtentHeader, ExtentIdx, Extent
 from .tools import FSException
@@ -8,17 +8,29 @@ from .tools import FSException
 class File:
     __metaclass__ = abc.ABCMeta
 
-    @classmethod
-    def from_path(cls, filesystem, path):
-        inode_no = filesystem.locate_file(path)
-        inode = filesystem.get_inode(inode_no)
-        file_type = inode.file_type()
-        try:
-            file_type_handler = inode_file_type_handlers[file_type]
-        except LookupError:
-            raise FSException(f"Unknown file type {file_type} for \"{path}\"") from None
-        file = file_type_handler(filesystem, path, inode_no, inode)
-        return file
+    def __new__(cls, filesystem, path, inode_no, inode: Inode):
+        if cls is File:
+            # Build a subclass of this abstract class
+            file_type = inode.get_file_type()
+            if file_type == Inode.Mode.IFIFO:
+                return Fifo.__new__(Fifo, filesystem, path, inode_no, inode)
+            elif file_type == Inode.Mode.IFCHR:
+                return CharDevice.__new__(CharDevice, filesystem, path, inode_no, inode)
+            elif file_type == Inode.Mode.IFDIR:
+                return Directory.__new__(Directory, filesystem, path, inode_no, inode)
+            elif file_type == Inode.Mode.IFBLK:
+                return BlockDevice.__new__(BlockDevice, filesystem, path, inode_no, inode)
+            elif file_type == Inode.Mode.IFREG:
+                return RegularFile.__new__(RegularFile, filesystem, path, inode_no, inode)
+            elif file_type == Inode.Mode.IFLNK:
+                return SymbolicLink.__new__(SymbolicLink, filesystem, path, inode_no, inode)
+            elif file_type == Inode.Mode.IFSOCK:
+                return Socket.__new__(Socket, filesystem, path, inode_no, inode)
+            else:
+                raise FSException(f"Unknown file type 0x{file_type:X} for \"{path}\"")
+        else:
+            # Instanciate a subclass, OK
+            return super().__new__(cls)
 
     def __init__(self, filesystem, path, inode_no, inode: Inode):
         self.filesystem = filesystem
@@ -35,28 +47,41 @@ class File:
         return f"{self.__class__.__name__}<[{self.inode_no}]:{self.path}>"
 
 
-class RegularFile(File):
-    pass
+class Fifo(File):
+    def __init__(self, filesystem, path, inode_no, inode: Inode):
+        super().__init__(filesystem, path, inode_no, inode)
+        raise NotImplementedError
+
+
+class CharDevice(File):
+    def __init__(self, filesystem, path, inode_no, inode: Inode):
+        super().__init__(filesystem, path, inode_no, inode)
+        raise NotImplementedError
 
 
 class Directory(File):
     __metaclass__ = abc.ABCMeta
 
     def __new__(cls, filesystem, path, inode_no, inode):
-        if inode.i_flags & inode.Flags.INDEX != 0:
-            return HashTreeDirectory(filesystem, path, inode_no, inode)
+        if cls is Directory:
+            # Build a subclass of this abstract class
+            if inode.i_flags & inode.Flags.INDEX != 0:
+                return HashTreeDirectory(filesystem, path, inode_no, inode)
+            else:
+                return LinearDirectory(filesystem, path, inode_no, inode)
         else:
-            return LinearDirectory(filesystem, path, inode_no, inode)
+            # Instanciate a subclass, OK
+            return super().__new__(cls, filesystem, path, inode_no, inode)
 
     @abc.abstractmethod
-    def _get_direntries(self):
+    def _get_direntries(self) -> Iterator[DirEntry]:
         raise NotImplementedError
 
     def get_files(self) -> [File]:
         for direntry in self._get_direntries():
             full_path = "/".join((self.path, direntry.name))
             inode_no = direntry.inode
-            inode = self.filesystem._get_inode(inode_no)
+            inode = self.filesystem.get_inode(inode_no)
             file = File(self.filesystem, full_path, inode_no, inode)
             yield file
 
@@ -66,8 +91,7 @@ class Directory(File):
             if direntry.name == path:
                 full_path = "/".join((self.path, path))
                 inode_no = direntry.inode
-                print(f"inode={inode_no}")
-                inode = self.filesystem._get_inode(inode_no)
+                inode = self.filesystem.get_inode(inode_no)
                 return File(self.filesystem, full_path, inode_no, inode)
         print(f"{path=}")
         raise FileNotFoundError(path) from None
@@ -87,11 +111,31 @@ class Directory(File):
             # At least one "/" in path.  Forward the work to the first subdir
             subdir = self._get_direct_subfile(first_dir)
             if not isinstance(subdir, Directory):
-                raise NotADirectoryError(self.path + "/" + first_dir)
+                raise NotADirectoryError(f"{self.path}/{first_dir}")
             if remaining_path == "":
                 return subdir
             else:
                 return subdir.get_file(remaining_path)
+
+
+class BlockDevice(File):
+    def __init__(self, filesystem, path, inode_no, inode: Inode):
+        super().__init__(filesystem, path, inode_no, inode)
+        raise NotImplementedError
+
+
+class RegularFile(File):
+    pass
+
+
+class SymbolicLink(File):
+    pass
+
+
+class Socket(File):
+    def __init__(self, filesystem, path, inode_no, inode: Inode):
+        super().__init__(filesystem, path, inode_no, inode)
+        raise NotImplementedError
 
 
 class LinearDirectory(Directory):
@@ -108,12 +152,6 @@ class HashTreeDirectory(Directory):
 
     def _get_direntries(self):
         raise NotImplementedError("Hash Tree directories are not supported")
-
-
-inode_file_type_handlers = {
-    Inode.Mode.IFDIR: Directory,
-    Inode.Mode.IFREG: RegularFile,
-}
 
 
 class FileContent:
