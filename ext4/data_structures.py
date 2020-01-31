@@ -139,21 +139,17 @@ class Superblock(ctypes.LittleEndianStructure):
 
     # Field types
 
-    class FeatureRoCompat(enum.IntEnum):
-        RO_COMPAT_SPARSE_SUPER = 0x1
-        RO_COMPAT_LARGE_FILE = 0x2
-        RO_COMPAT_BTREE_DIR = 0x4
-        RO_COMPAT_HUGE_FILE = 0x8
-        RO_COMPAT_GDT_CSUM = 0x10
-        RO_COMPAT_DIR_NLINK = 0x20
-        RO_COMPAT_EXTRA_ISIZE = 0x40
-        RO_COMPAT_HAS_SNAPSHOT = 0x80
-        RO_COMPAT_QUOTA = 0x100
-        RO_COMPAT_BIGALLOC = 0x200
-        RO_COMPAT_METADATA_CSUM = 0x400
-        RO_COMPAT_REPLICA = 0x800
-        RO_COMPAT_READONLY = 0x1000
-        RO_COMPAT_PROJECT = 0x2000
+    class FeatureCompat(enum.IntEnum):
+        COMPAT_DIR_PREALLOC = 0x1
+        COMPAT_IMAGIC_INODES = 0x2
+        COMPAT_HAS_JOURNAL = 0x4
+        COMPAT_EXT_ATTR = 0x8
+        COMPAT_RESIZE_INODE = 0x10
+        COMPAT_DIR_INDEX = 0x20
+        COMPAT_LAZY_BG = 0x40
+        COMPAT_EXCLUDE_INODE = 0x80
+        COMPAT_EXCLUDE_BITMAP = 0x100
+        COMPAT_SPARSE_SUPER2 = 0x200
 
     class FeatureIncompat(enum.IntEnum):
         INCOMPAT_COMPRESSION = 0x1
@@ -171,6 +167,22 @@ class Superblock(ctypes.LittleEndianStructure):
         INCOMPAT_LARGEDIR = 0x4000
         INCOMPAT_INLINE_DATA = 0x8000
         INCOMPAT_ENCRYPT = 0x10000
+
+    class FeatureRoCompat(enum.IntEnum):
+        RO_COMPAT_SPARSE_SUPER = 0x1
+        RO_COMPAT_LARGE_FILE = 0x2
+        RO_COMPAT_BTREE_DIR = 0x4
+        RO_COMPAT_HUGE_FILE = 0x8
+        RO_COMPAT_GDT_CSUM = 0x10
+        RO_COMPAT_DIR_NLINK = 0x20
+        RO_COMPAT_EXTRA_ISIZE = 0x40
+        RO_COMPAT_HAS_SNAPSHOT = 0x80
+        RO_COMPAT_QUOTA = 0x100
+        RO_COMPAT_BIGALLOC = 0x200
+        RO_COMPAT_METADATA_CSUM = 0x400
+        RO_COMPAT_REPLICA = 0x800
+        RO_COMPAT_READONLY = 0x1000
+        RO_COMPAT_PROJECT = 0x2000
 
 
 class BlockGroupDescriptor(ctypes.LittleEndianStructure):

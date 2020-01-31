@@ -54,19 +54,21 @@ def _collect_flags(value, flag_list):
 def superblock_dump(filesystem):
     superblock = filesystem.conf
     print(f"Superblock of {filesystem.block_device}")
-    ro_compat_flags = _collect_flags(superblock.s_feature_ro_compat, superblock.FeatureRoCompat)
+    compat_flags = _collect_flags(superblock.s_feature_compat, superblock.FeatureCompat)
     incompat_flags = _collect_flags(superblock.s_feature_incompat, superblock.FeatureIncompat)
+    ro_compat_flags = _collect_flags(superblock.s_feature_ro_compat, superblock.FeatureRoCompat)
     _dump_struct(superblock,
-                 s_freature_ro_compat=ro_compat_flags,
+                 s_feature_compat=compat_flags,
                  s_feature_incompat=incompat_flags,
+                 s_feature_ro_compat=ro_compat_flags,
                  s_volume_name="\"" + superblock.get_volume_name() + "\"")
     print("Raw data:")
     _raw_dump(filesystem, superblock)
 
 
 def block_group_descriptor_dump(filesystem, block_group_no):
-    bgd = filesystem.get_block_group_desc(block_group_no)
-    print(f"Block group descriptor {bgd.no} of {filesystem.block_device} (@{bgd.pos}):")
+    bgd = filesystem.get_block_group_desc(block_group_no, strict=False)
+    print(f"Block group descriptor {bgd.no} of {filesystem.block_device} (@0x{bgd.pos:X}):")
     try:
         bgd._verify_checksums()
         cksum = True
@@ -82,7 +84,7 @@ def block_group_descriptor_dump(filesystem, block_group_no):
 
 def inode_dump(filesystem, inode_no):
     inode = filesystem.get_inode(inode_no)
-    print(f"Inode {inode.no} of {filesystem.block_device} (@{inode.pos}, #{inode.pos // 4096:04X}:{inode.pos % 4096:04X}):")
+    print(f"Inode {inode.no} of {filesystem.block_device} (@0x{inode.pos:X}):")
     try:
         inode._verify_checksums()
         cksum = True
@@ -100,7 +102,8 @@ def inode_dump(filesystem, inode_no):
 def inode_content_dump(filesystem, inode_no):
     inode = filesystem.get_inode(inode_no)
     file_content = FileContent(filesystem, inode)
-    print(f"Inode {inode.no} of {filesystem.block_device}'s content block numbers: "
+    print(f"Inode {inode.no} of {filesystem.block_device}:")
+    print("Content block numbers: "
           f"[{', '.join(map(str, file_content.get_blocks_no()))}]")
 
 
