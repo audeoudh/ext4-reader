@@ -337,12 +337,12 @@ class Inode(ctypes.LittleEndianStructure):
 
     # Some accelerators
 
-    def file_type(self):
+    def get_file_type(self):
         file_type = self.i_mode & 0xF000
         try:
             return self.Mode(file_type)
         except ValueError:
-            raise FSException(f"Unknwon file type {file_type}") from None
+            raise FSException(f"Unknwon file type 0x{file_type:X}")
 
     # Field types
 
@@ -457,9 +457,70 @@ class Extent(ctypes.LittleEndianStructure):
 
     def get_start(self):
         return (self.ee_start_hi << 32) | self.ee_start_lo
+
+
+class DirEntry:
+    _MIN_DIRENTRY_SIZE = 8
+
+    def __init__(self, raw_entry):
+        # Pre-load (we do not know the size of the entry).  8 is the minimum entry size
+        self._raw_data = raw_entry[:self._MIN_DIRENTRY_SIZE]
+        # Fetch the record size
+        size = self.rec_len
+        # Load the data
+        self._raw_data = raw_entry[:size]
+
     # Fields
 
     @property
-    def i_mode(self):
-        """File mode."""
-        return int.from_bytes(self._raw_data[0x00:0x00 + 2], 'little')
+    def inode(self):
+        """Number of the inode that this directory entry points to."""
+        return int.from_bytes(self._raw_data[0x00:0x00 + 4], 'little')
+
+    @property
+    def rec_len(self):
+        """Length of this directory entry. Must be a multiple of 4."""
+        return int.from_bytes(self._raw_data[0x04:0x04 + 2], 'little')
+
+    @property
+    def name_len(self):
+        """Length of the file name."""
+        return int.from_bytes(self._raw_data[0x06:0x06 + 2], 'little')
+
+    @property
+    def name(self):
+        """File name."""
+        return self._raw_data[0x08:0x08 + self.name_len].decode('utf-8')
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}<{self.name}>"
+
+
+class DirEntry2(DirEntry):
+    # Field types
+
+    class FileType(enum.IntEnum):
+        UNKNOWN = 0x0
+        REGULAR_FILE = 0x1
+        DIRECTORY = 0x2
+        CHARACTER_DEVICE_FILE = 0x3
+        BLOCK_DEVICE_FILE = 0x4
+        FIFO = 0x5
+        SOCKET = 0x6
+        SYMBOLIC_LINK = 0x7
+        DIR_ENTRY_TAIL = 0xDE
+
+    # Fields
+
+    @property
+    def name_len(self):
+        """Length of the file name."""
+        return int.from_bytes(self._raw_data[0x06:0x06 + 1], 'little')
+
+    @property
+    def file_type(self):
+        """File type code."""
+        return self.FileType(self._raw_data[0x07])
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}<{self.name}({self.file_type.name})>"

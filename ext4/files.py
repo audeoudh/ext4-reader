@@ -1,7 +1,7 @@
 import abc
 from typing import Optional, Iterator
 
-from .data_structures import Inode, ExtentHeader, ExtentIdx, Extent
+from .data_structures import Inode, ExtentHeader, ExtentIdx, Extent, DirEntry, DirEntry2
 from .tools import FSException
 
 
@@ -118,6 +118,26 @@ class Directory(File):
                 return subdir.get_file(remaining_path)
 
 
+class LinearDirectory(Directory):
+    def _get_direntries(self) -> [DirEntry]:
+        for block in self.content.get_blocks():
+            i = 0
+            while i < 4096:
+                if self.filesystem.conf.s_feature_incompat & self.filesystem.conf.FeatureIncompat.INCOMPAT_FILETYPE == 0:
+                    de = DirEntry(block[i:])
+                else:
+                    de = DirEntry2(block[i:])
+                if de.inode == 0:
+                    break
+                yield de
+                i += de.rec_len
+
+
+class HashTreeDirectory(Directory):
+    def _get_direntries(self) -> Iterator[DirEntry]:
+        raise NotImplementedError("Hash Tree directories are not supported")
+
+
 class BlockDevice(File):
     def __init__(self, filesystem, path, inode_no, inode: Inode):
         super().__init__(filesystem, path, inode_no, inode)
@@ -136,22 +156,6 @@ class Socket(File):
     def __init__(self, filesystem, path, inode_no, inode: Inode):
         super().__init__(filesystem, path, inode_no, inode)
         raise NotImplementedError
-
-
-class LinearDirectory(Directory):
-    def __new__(cls, *args, **kwargs):
-        return object.__new__(cls)
-
-    def _get_direntries(self):
-        raise NotImplementedError("Linear directories are not supported")
-
-
-class HashTreeDirectory(Directory):
-    def __new__(cls, *args, **kwargs):
-        return object.__new__(cls)
-
-    def _get_direntries(self):
-        raise NotImplementedError("Hash Tree directories are not supported")
 
 
 class FileContent:
@@ -177,6 +181,10 @@ class FileContent:
     @abc.abstractmethod
     def get_blocks_no(self) -> Iterator[int]:
         raise NotImplementedError
+
+    def get_blocks(self) -> Iterator[bytes]:
+        for block_no in self.get_blocks_no():
+            yield self.filesystem.get_block(block_no)
 
 
 class DirectIndirectFileContent(FileContent):

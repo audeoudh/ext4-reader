@@ -2,7 +2,7 @@ import ctypes
 
 import ext4.tools
 from ext4 import Filesystem
-from ext4.files import FileContent
+from ext4.files import FileContent, File, Directory
 
 
 def _raw_dump(filesystem, blob, offset=0):
@@ -105,6 +105,11 @@ def inode_content_dump(filesystem, inode_no):
     print(f"Inode {inode.no} of {filesystem.block_device}:")
     print("Content block numbers: "
           f"[{', '.join(map(str, file_content.get_blocks_no()))}]")
+    if inode.get_file_type() == inode.Mode.IFDIR:
+        print("Is a directory, with entries (names & inodes):")
+        dir = Directory(filesystem, "NOT A PATH", inode_no, inode)
+        for de in dir._get_direntries():
+            print(f"  {de.name:16}  {de.inode:> 8X}")
 
 
 def block_dump(filesystem, block_no):

@@ -42,3 +42,5 @@ were done).  Based on that documentation, we implemented:
 - Read file content
   - direct block addressing
   - extent tree of depth 1
+- Read directory entries
+  - Linear directories
