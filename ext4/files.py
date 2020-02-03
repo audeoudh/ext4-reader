@@ -231,6 +231,9 @@ class FileContent:
         self.filesystem = filesystem
         self.inode = inode
 
+    def get_size(self):
+        return (self.inode.i_size_high << 32) | self.inode.i_size_lo
+
     @abc.abstractmethod
     def get_blocks_no(self) -> Iterator[int]:
         raise NotImplementedError
@@ -238,6 +241,18 @@ class FileContent:
     def get_blocks(self) -> Iterator[bytes]:
         for block_no in self.get_blocks_no():
             yield self.filesystem.get_block(block_no)
+
+    def get_bytes(self, start=0, end=-1):
+        if end < 0:
+            end = self.get_size() + end + 1
+        if not (0 <= start < end <= self.get_size()):
+            raise ValueError(f"Cannot get file range between {start} and {end}")
+        selected_blocks_no = [b_no for b_index, b_no in enumerate(self.get_blocks_no()) if start // 4096 <= b_index <= end // 4096]
+        selected_blocks = [self.filesystem.get_block(block_no) for block_no in selected_blocks_no]
+        # Truncate ends
+        selected_blocks[0] = selected_blocks[0][start % 4096:]
+        selected_blocks[-1] = selected_blocks[-1][:end % 4096]
+        return b"".join(selected_blocks)
 
 
 class DirectIndirectFileContent(FileContent):
