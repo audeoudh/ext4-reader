@@ -94,8 +94,10 @@ def inode_dump(filesystem, inode_no):
     for ft in list(inode.Mode)[12:]:
         if (inode.i_mode & 0xF000) == ft:
             mode += f"|{ft.name}"
+    flags = _collect_flags(inode.i_flags, inode.Flags)
     _dump_struct(inode,
                  i_checksum_hi=("valid" if cksum else "INVALID"),
+                 i_flags=flags,
                  i_mode=mode)
 
 
@@ -104,12 +106,12 @@ def inode_content_dump(filesystem, inode_no):
     file_content = FileContent(filesystem, inode)
     print(f"Inode {inode.no} of {filesystem.block_device}:")
     print("Content block numbers: "
-          f"[{', '.join(map(str, file_content.get_blocks_no()))}]")
+          "[" + ', '.join(f"0x{b_no:X}" for b_no in file_content.get_blocks_no()) + "]")
     if inode.get_file_type() == inode.Mode.IFDIR:
         print("Is a directory, with entries (names & inodes):")
         dir = Directory(filesystem, "NOT A PATH", inode_no, inode)
         for de in dir._get_direntries():
-            print(f"  {de.name:16}  {de.inode:> 8X}")
+            print(f"  {de.get_name():16}  {de.inode:> 8X}")
 
 
 def block_dump(filesystem, block_no):

@@ -1,7 +1,7 @@
 import abc
 from typing import Optional, Iterator
 
-from .data_structures import Inode, ExtentHeader, ExtentIdx, Extent, DirEntry, DirEntry2
+from .data_structures import Inode, ExtentHeader, ExtentIdx, Extent, DirEntry, DirEntry2, Superblock
 from .tools import FSException
 
 
@@ -40,6 +40,11 @@ class File:
         self.content = FileContent(self.filesystem, inode)
 
     @property
+    @abc.abstractmethod
+    def file_type(self):
+        raise NotImplementedError
+
+    @property
     def filename(self):
         return self.path.rsplit("/", 1)[1]
 
@@ -52,11 +57,19 @@ class Fifo(File):
         super().__init__(filesystem, path, inode_no, inode)
         raise NotImplementedError
 
+    @property
+    def file_type(self):
+        return Inode.Mode.IFIFO
+
 
 class CharDevice(File):
     def __init__(self, filesystem, path, inode_no, inode: Inode):
         super().__init__(filesystem, path, inode_no, inode)
         raise NotImplementedError
+
+    @property
+    def file_type(self):
+        return Inode.Mode.IFCHR
 
 
 class Directory(File):
@@ -73,13 +86,17 @@ class Directory(File):
             # Instanciate a subclass, OK
             return super().__new__(cls, filesystem, path, inode_no, inode)
 
+    @property
+    def file_type(self):
+        return Inode.Mode.IFDIR
+
     @abc.abstractmethod
     def _get_direntries(self) -> Iterator[DirEntry]:
         raise NotImplementedError
 
     def get_files(self) -> [File]:
         for direntry in self._get_direntries():
-            full_path = "/".join((self.path, direntry.name))
+            full_path = "/".join((self.path, direntry.get_name()))
             inode_no = direntry.inode
             inode = self.filesystem.get_inode(inode_no)
             file = File(self.filesystem, full_path, inode_no, inode)
@@ -88,7 +105,7 @@ class Directory(File):
     def _get_direct_subfile(self, path) -> Optional[File]:
         """Non-recursive version of `get_file()`."""
         for direntry in self._get_direntries():
-            if direntry.name == path:
+            if direntry.get_name() == path:
                 full_path = "/".join((self.path, path))
                 inode_no = direntry.inode
                 inode = self.filesystem.get_inode(inode_no)
@@ -123,11 +140,12 @@ class LinearDirectory(Directory):
         for block in self.content.get_blocks():
             i = 0
             while i < 4096:
-                if self.filesystem.conf.s_feature_incompat & self.filesystem.conf.FeatureIncompat.INCOMPAT_FILETYPE == 0:
-                    de = DirEntry(block[i:])
+                if not self.filesystem.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_FILETYPE):
+                    de = DirEntry().read_bytes(block[i:])
                 else:
-                    de = DirEntry2(block[i:])
+                    de = DirEntry2().read_bytes(block[i:])
                 if de.inode == 0:
+                    # End of the entry
                     break
                 yield de
                 i += de.rec_len
@@ -143,19 +161,31 @@ class BlockDevice(File):
         super().__init__(filesystem, path, inode_no, inode)
         raise NotImplementedError
 
+    @property
+    def file_type(self):
+        return Inode.Mode.IFBLK
+
 
 class RegularFile(File):
-    pass
+    @property
+    def file_type(self):
+        return Inode.Mode.IFREG
 
 
 class SymbolicLink(File):
-    pass
+    @property
+    def file_type(self):
+        return Inode.Mode.IFLNK
 
 
 class Socket(File):
     def __init__(self, filesystem, path, inode_no, inode: Inode):
         super().__init__(filesystem, path, inode_no, inode)
         raise NotImplementedError
+
+    @property
+    def file_type(self):
+        return Inode.Mode.IFSOCK
 
 
 class FileContent:

@@ -459,44 +459,66 @@ class Extent(ctypes.LittleEndianStructure):
         return (self.ee_start_hi << 32) | self.ee_start_lo
 
 
-class DirEntry:
-    _MIN_DIRENTRY_SIZE = 8
+class DirEntry(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("inode", ctypes.c_uint32),
+        ("rec_len", ctypes.c_uint16),
+        ("name_len", ctypes.c_uint16),
+        # ("name",)  # Variable length, see below
+    ]
 
-    def __init__(self, raw_entry):
-        # Pre-load (we do not know the size of the entry).  8 is the minimum entry size
-        self._raw_data = raw_entry[:self._MIN_DIRENTRY_SIZE]
-        # Fetch the record size
-        size = self.rec_len
-        # Load the data
-        self._raw_data = raw_entry[:size]
+    def __init__(self):
+        super().__init__()
+        self._name = ...
 
-    # Fields
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        # Variable-length field, stored separately
+        self._name = struct_data[0x08:0x08 + self.name_len]
+        return self
 
-    @property
-    def inode(self):
-        """Number of the inode that this directory entry points to."""
-        return int.from_bytes(self._raw_data[0x00:0x00 + 4], 'little')
-
-    @property
-    def rec_len(self):
-        """Length of this directory entry. Must be a multiple of 4."""
-        return int.from_bytes(self._raw_data[0x04:0x04 + 2], 'little')
-
-    @property
-    def name_len(self):
-        """Length of the file name."""
-        return int.from_bytes(self._raw_data[0x06:0x06 + 2], 'little')
+    # Accelerators
 
     @property
     def name(self):
-        """File name."""
-        return self._raw_data[0x08:0x08 + self.name_len].decode('utf-8')
+        return self._name
 
-    def __repr__(self):
-        return f"{self.__class__.__name__}<{self.name}>"
+    def get_name(self):
+        return self.name.decode('utf-8')
 
 
-class DirEntry2(DirEntry):
+class DirEntry2(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("inode", ctypes.c_uint32),
+        ("rec_len", ctypes.c_uint16),
+        ("name_len", ctypes.c_uint8),
+        ("file_type", ctypes.c_uint8),
+        # ("name",)  # Variable length
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self._name = ...
+
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        # Variable-length field, stored separately
+        self._name = struct_data[0x08:0x08 + self.name_len]
+        return self
+
+    # Accelerators
+
+    @property
+    def name(self):
+        return self._name
+
+    def get_name(self):
+        return self.name.decode('utf-8')
+
     # Field types
 
     class FileType(enum.IntEnum):
@@ -510,17 +532,19 @@ class DirEntry2(DirEntry):
         SYMBOLIC_LINK = 0x7
         DIR_ENTRY_TAIL = 0xDE
 
-    # Fields
+    # Accelerators
 
     @property
-    def name_len(self):
-        """Length of the file name."""
-        return int.from_bytes(self._raw_data[0x06:0x06 + 1], 'little')
+    def get_file_type(self):
+        return self.FileType(self.file_type)
 
-    @property
-    def file_type(self):
-        """File type code."""
-        return self.FileType(self._raw_data[0x07])
 
-    def __repr__(self):
-        return f"{self.__class__.__name__}<{self.name}({self.file_type.name})>"
+class DirEntryTail(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("reserved_zero1", ctypes.c_uint32),
+        ("rec_len", ctypes.c_uint16),
+        ("reserved_zero2", ctypes.c_uint8),
+        ("reserved_ft", ctypes.c_uint8),
+        ("checksum", ctypes.c_uint32)
+    ]
