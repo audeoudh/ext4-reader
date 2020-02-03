@@ -1,7 +1,9 @@
 import abc
 from typing import Optional, Iterator
 
-from .data_structures import Inode, ExtentHeader, ExtentIdx, Extent, DirEntry, DirEntry2, Superblock
+from .data_structures import \
+    Inode, ExtentHeader, ExtentIdx, Extent, \
+    DirEntry, DirEntry2, Superblock, DxRoot
 from .tools import FSException
 
 
@@ -137,13 +139,12 @@ class Directory(File):
 
 class LinearDirectory(Directory):
     def _get_direntries(self) -> [DirEntry]:
+        dir_entry_klass = DirEntry2 if self.filesystem.conf.has_flag(
+            Superblock.FeatureIncompat.INCOMPAT_FILETYPE) else DirEntry
         for block in self.content.get_blocks():
             i = 0
             while i < 4096:
-                if not self.filesystem.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_FILETYPE):
-                    de = DirEntry().read_bytes(block[i:])
-                else:
-                    de = DirEntry2().read_bytes(block[i:])
+                de = dir_entry_klass().read_bytes(block[i:])
                 if de.inode == 0:
                     # End of the entry
                     break
@@ -153,7 +154,29 @@ class LinearDirectory(Directory):
 
 class HashTreeDirectory(Directory):
     def _get_direntries(self) -> Iterator[DirEntry]:
-        raise NotImplementedError("Hash Tree directories are not supported")
+        dir_entry_klass = DirEntry2 if self.filesystem.conf.has_flag(
+            Superblock.FeatureIncompat.INCOMPAT_FILETYPE) else DirEntry
+        content_nos = list(self.content.get_blocks_no())
+        head = self.filesystem.get_block(content_nos[0])
+        dx_root = DxRoot().read_bytes(head)
+        if dx_root.dx_root_info.indirect_levels > 0:
+            raise NotImplementedError("Multi-levels hash directories are not supported")
+        # Standard iteration over other blocks.  Htrees parts are hidden in big (but valid) DirEntries
+        for block_no in content_nos[1:]:
+            block = self.filesystem.get_block(block_no)
+            # In this block are some standards DirEntries
+            i = 0
+            while i < 4096:
+                de = dir_entry_klass().read_bytes(block[i:])
+                if de.inode == 0:
+                    # End of the entry
+                    break
+                yield de
+                i += de.rec_len
+
+    def _get_direct_subfile(self, path):
+        # TODO: directory is index, we should use the index
+        return super()._get_direct_subfile(path)
 
 
 class BlockDevice(File):

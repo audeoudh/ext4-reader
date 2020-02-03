@@ -548,3 +548,125 @@ class DirEntryTail(ctypes.LittleEndianStructure):
         ("reserved_ft", ctypes.c_uint8),
         ("checksum", ctypes.c_uint32)
     ]
+
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        return self
+
+
+class DxRootInfo(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("reserved_zero", ctypes.c_uint32),
+        ("hash_version", ctypes.c_uint8),
+        ("info_length", ctypes.c_uint8),
+        ("indirect_levels", ctypes.c_uint8),
+        ("unused_flags", ctypes.c_uint8)
+    ]
+
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        return self
+
+    # Accelerators
+
+    def get_hash_algo(self):
+        return self.HashAlgo(self.hash_version).algo
+
+    # Field types
+
+    class HashAlgo(enum.IntEnum):
+        LEGACY = 0x0
+        HALF_MD4 = 0x1
+        TEA = 0x2
+        LEGACY_UNSIGNED = 0x3
+        HALF_MD4_UNSIGNED = 0x4
+        TEA_UNSIGNED = 0x5
+
+        @property
+        def algo(self):
+            """Real algorithm.  None if not currently supported."""
+            return [None, None, None, None, None, None][self]
+
+
+class DxEntry(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("hash", ctypes.c_uint32),
+        ("block", ctypes.c_uint32)
+    ]
+
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        return self
+
+
+class DxTail(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("dt_reserved", ctypes.c_uint32),
+        ("dt_checksum", ctypes.c_uint32)
+    ]
+
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        return self
+
+
+class DxRoot(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("dot", DirEntry2),
+        ("_dotname", ctypes.c_uint8 * 4),
+        ("dotdot", DirEntry2),
+        ("_dotdotname", ctypes.c_uint8 * 4),
+        ("dx_root_info", DxRootInfo),
+        ("limit", ctypes.c_uint16),
+        ("count", ctypes.c_uint16),
+        ("block", ctypes.c_uint32),
+    ]
+
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        self._entries_buffer = struct_data[fit:fit + (self.count - 1)]
+        return self
+
+    @property
+    def entries(self):
+        return self
+
+    def __getitem__(self, index):
+        return self.get_entry(index)
+
+    def __iter__(self):
+        for i in range(self.count - 1):
+            yield DxEntry().read_bytes(self._entries_buffer[i * 8:])
+
+    def get_entry(self, index):
+        if not 0 <= index < self.count - 1:
+            raise IndexError
+        return DxEntry().read_bytes(self._entries_buffer[index * 8:])
+
+
+class DxNode(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ("inode", ctypes.c_uint32),
+        ("rec_len", ctypes.c_uint16),
+        ("name_len", ctypes.c_uint8),
+        ("file_type", ctypes.c_uint8),
+        ("limit", ctypes.c_uint16),
+        ("count", ctypes.c_uint16),
+        ("block", ctypes.c_uint32),
+        ("entries", DxEntry)
+    ]
+
+    def read_bytes(self, struct_data):
+        fit = min(len(struct_data), ctypes.sizeof(self))
+        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        return self
