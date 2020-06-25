@@ -216,18 +216,20 @@ class BlockGroupDescriptor(ctypes.LittleEndianStructure):
         return self
 
     def _verify_checksums(self):
-        data = bytes(self.filesystem.UUID)
-        data += self.no.to_bytes(4, 'little')
-        data += bytes(self)[:0x1E]  # FIXME for 64bits structure…
-        if self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM != 0 \
-                and self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_GDT_CSUM == 0:
-            csum = crc32c(data) & 0xFFFF
-        elif self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_GDT_CSUM != 0:
-            csum = crc16(data)
-        else:
-            raise FSException("Unknown checksum method")
+        data = bytes(self.filesystem.UUID) + self.no.to_bytes(4, 'little') + bytes(self)[:0x1E]
+        csum = self._get_checksum_algo()(data) & 0xFFFF
         if csum != self.bg_checksum:
             raise FSException(f"Wrong checksum in block group descriptor {self.no}")
+
+    def _get_checksum_algo(self):
+        if self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_GDT_CSUM != 0 \
+                and self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM == 0:
+            return crc16
+        elif self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM != 0:
+            return crc32c
+        else:
+            raise FSException("Unknown checksum method")
+
 
     # Some accelerators
 
@@ -252,7 +254,7 @@ class BlockGroupDescriptor(ctypes.LittleEndianStructure):
 
 
 class BlockGroupDescriptor64(BlockGroupDescriptor):
-    _fields_ = BlockGroupDescriptor._fields_ + [
+    _fields_ = [
         ("bg_block_bitmap_hi", ctypes.c_uint32),
         ("bg_inode_bitmap_hi", ctypes.c_uint32),
         ("bg_inode_table_hi", ctypes.c_uint32),
@@ -265,6 +267,13 @@ class BlockGroupDescriptor64(BlockGroupDescriptor):
         ("bg_inode_bitmap_csum_hi", ctypes.c_uint16),
         ("bg_reserved", ctypes.c_uint32)
     ]
+
+    def _verify_checksums(self):
+        data = bytes(self.filesystem.UUID) + self.no.to_bytes(4, 'little') + bytes(self)[:0x1E] \
+               + b"\x00\x00" + bytes(self)[0x20:]
+        csum = self._get_checksum_algo()(data) & 0xFFFF
+        if csum != self.bg_checksum:
+            raise FSException(f"Wrong checksum in block group descriptor {self.no}")
 
     def get_bg_block_bitmap_loc(self):
         return (self.bg_block_bitmap_hi << 32) + self.bg_block_bitmap_lo * self.filesystem.conf.get_block_size()

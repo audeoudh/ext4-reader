@@ -28,7 +28,8 @@ def _raw_dump(filesystem, blob, offset=0):
 
 def _dump_struct(struct, **comments):
     lines = []
-    for name, type_ in struct._fields_:
+    fields = [f for k in reversed(struct.__class__.__mro__) if hasattr(k, '_fields_') for f in k._fields_]
+    for name, type_ in fields:
         field = getattr(struct.__class__, name)
         value = getattr(struct, name)
         if issubclass(type_, ctypes.Array):
