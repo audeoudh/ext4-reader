@@ -100,7 +100,8 @@ class Directory(File):
 
     def get_files(self) -> [File]:
         for direntry in self._get_direntries():
-            full_path = "/".join((self.path, direntry.get_name()))
+            full_path = "/".join((self.path, direntry.get_name())) if not self.path.endswith("/") \
+                else self.path + direntry.get_name()
             inode_no = direntry.inode
             inode = self.filesystem.get_inode(inode_no)
             file = File(self.filesystem, full_path, inode_no, inode)
