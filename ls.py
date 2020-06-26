@@ -1,3 +1,5 @@
+import logging
+
 from ext4 import Filesystem, FileType
 
 
@@ -35,6 +37,8 @@ def _args_parser():
                         help="do not ignore entries starting with .")
     parser.add_argument("-l", action='store_true', dest="long_format",
                         help="use a long listing format")
+    parser.add_argument("-v", "--verbose", action='store_true',
+                        help="Show debug information")
     parser.add_argument("path", metavar="FILE",
                         help="List information about the FILE")
     return parser
@@ -43,4 +47,7 @@ def _args_parser():
 if __name__ == '__main__':
     _parser = _args_parser()
     opts = _parser.parse_args()
+    if hasattr(opts, 'verbose'):
+        logging.basicConfig(level=logging.INFO if opts.verbose else logging.WARNING)
+        del opts.verbose
     main(**vars(opts))

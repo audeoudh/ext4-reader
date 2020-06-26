@@ -1,6 +1,7 @@
 import ctypes
 import enum
 
+from . import logger
 from .tools import FSException, crc16, crc32c
 
 
@@ -109,7 +110,11 @@ class Superblock(ctypes.LittleEndianStructure):
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
         if strict:
             self._verify_checksums(struct_data)
+        logger.info("Decoded superbock: FS UUID = %s", self._format_uuid())
         return self
+
+    def _format_uuid(self):
+        return "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x" % tuple(self.s_uuid)
 
     def _verify_checksums(self, struct_data):
         if self.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM != 0:
@@ -213,6 +218,7 @@ class BlockGroupDescriptor(ctypes.LittleEndianStructure):
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
         if strict:
             self._verify_checksums()
+        logger.info("Decoded block group descriptor %d (@%X)", self.no, self.pos)
         return self
 
     def _verify_checksums(self):

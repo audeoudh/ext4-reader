@@ -1,6 +1,7 @@
 import abc
 from typing import Optional, Iterator
 
+from . import logger
 from .data_structures import \
     Inode, ExtentHeader, ExtentIdx, Extent, \
     DirEntry, DirEntry2, Superblock, DxRoot
@@ -40,6 +41,7 @@ class File:
         self.inode_no = inode_no
         self.inode = inode
         self.content = FileContent(self.filesystem, inode)
+        logger.info("Open file \"%s\" (inode %d, is a %s)", path, inode_no, self.__class__.__name__)
 
     @property
     @abc.abstractmethod
