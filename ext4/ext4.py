@@ -1,4 +1,5 @@
 import enum
+import functools
 import os
 
 from ext4.files import Directory, File
@@ -63,6 +64,7 @@ class Filesystem:
     def get_block(self, index, n=1):
         return self.get_bytes(index * self.conf.get_block_size(), n * self.conf.get_block_size())
 
+    @functools.lru_cache(32)  # 128B per entry
     def get_block_group_desc(self, bg_no, strict=True) -> BlockGroupDescriptor:
         # Compute block group position
         bgd_size = self.conf.s_desc_size if self.conf.has_flag(self.conf.FeatureIncompat.INCOMPAT_64BIT) else 32
