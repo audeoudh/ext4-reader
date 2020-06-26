@@ -83,9 +83,9 @@ class Directory(File):
         if cls is Directory:
             # Build a subclass of this abstract class
             if inode.i_flags & inode.Flags.INDEX != 0:
-                return HashTreeDirectory(filesystem, path, inode_no, inode)
+                return HashTreeDirectory.__new__(HashTreeDirectory, filesystem, path, inode_no, inode)
             else:
-                return LinearDirectory(filesystem, path, inode_no, inode)
+                return LinearDirectory.__new__(LinearDirectory, filesystem, path, inode_no, inode)
         else:
             # Instanciate a subclass, OK
             return super().__new__(cls, filesystem, path, inode_no, inode)
