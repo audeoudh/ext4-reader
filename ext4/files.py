@@ -52,6 +52,32 @@ class File:
     def filename(self):
         return self.path.rsplit("/", 1)[1]
 
+    def get_stat(self):
+        # TODO: linux only!  Fields of os.stat_result depends on OS
+        import os
+        stat = os.stat_result((
+            self.inode.i_mode,  # st_mode
+            self.inode.no,  # st_ino
+            0,  # st_dev, TODO: not supported yet
+            self.inode.i_links_count,  # st_nlink
+            self.inode.i_uid,  # st_uid
+            self.inode.i_gid,  # st_gid
+            self.inode.get_size(),  # st_size
+            -1,  # Unused field
+            -1,  # Unused field
+            -1,  # Unused field
+            self.inode.get_atime_ns() / 1e9,  # st_atime
+            self.inode.get_mtime_ns() / 1e9,  # st_mtime
+            self.inode.get_ctime_ns() / 1e9,  # st_ctime
+            self.inode.get_atime_ns(),  # st_atime_ns
+            self.inode.get_mtime_ns(),  # st_mtime_ns
+            self.inode.get_ctime_ns(),  # st_ctime_ns
+            self.inode.get_blocksize(),  # st_blksize
+            self.inode.get_block_count(),  # st_blocks
+            0,  # st_rdev, TODO: not supported yet
+        ))
+        return stat
+
     def __repr__(self):
         return f"{self.__class__.__name__}<[{self.inode_no}]:{self.path}>"
 
@@ -233,9 +259,6 @@ class FileContent:
         self.filesystem = filesystem
         self.inode = inode
 
-    def get_size(self):
-        return (self.inode.i_size_high << 32) | self.inode.i_size_lo
-
     @abc.abstractmethod
     def get_blocks_no(self) -> Iterator[int]:
         raise NotImplementedError
@@ -246,14 +269,16 @@ class FileContent:
 
     def get_bytes(self, start=0, end=-1):
         if end < 0:
-            end = self.get_size() + end + 1
-        if not (0 <= start < end <= self.get_size()):
+            end = self.inode.get_size() + end + 1
+        if not (0 <= start < end <= self.inode.get_size()):
             raise ValueError(f"Cannot get file range between {start} and {end}")
-        selected_blocks_no = [b_no for b_index, b_no in enumerate(self.get_blocks_no()) if start // 4096 <= b_index <= end // 4096]
+        block_size = self.filesystem.conf.get_block_size()
+        selected_blocks_no = [b_no for b_index, b_no in enumerate(self.get_blocks_no())
+                              if start // block_size <= b_index <= end // block_size]
         selected_blocks = [self.filesystem.get_block(block_no) for block_no in selected_blocks_no]
         # Truncate ends
-        selected_blocks[0] = selected_blocks[0][start % 4096:]
-        selected_blocks[-1] = selected_blocks[-1][:end % 4096]
+        selected_blocks[0] = selected_blocks[0][start % block_size:]
+        selected_blocks[-1] = selected_blocks[-1][:end % block_size]
         return b"".join(selected_blocks)
 
 

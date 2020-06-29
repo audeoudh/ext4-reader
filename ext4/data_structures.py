@@ -1,7 +1,7 @@
 import ctypes
 import enum
 
-from . import logger
+from . import logger, tools
 from .tools import FSException, crc16, crc32c
 
 
@@ -400,7 +400,7 @@ class Inode(ctypes.LittleEndianStructure):
         ("i_block", ctypes.c_uint32 * 15),
         ("i_generation", ctypes.c_uint32),
         ("i_file_acl_lo", ctypes.c_uint32),
-        ("i_size_high", ctypes.c_uint32),  # i_dir_acl in ext2/3
+        ("i_size_high", ctypes.c_uint32),
         ("i_obso_faddr", ctypes.c_uint32),
         ("i_osd2", _Inode_Osd2),
         ("i_extra_isize", ctypes.c_uint16),
@@ -422,6 +422,9 @@ class Inode(ctypes.LittleEndianStructure):
         self.no = inode_no
         self.pos = position
         self._extraneous_data = ...
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}<{self.no}>"
 
     def read_bytes(self, struct_data):
         if len(struct_data) < self.filesystem.conf.s_inode_size:
@@ -473,12 +476,57 @@ class Inode(ctypes.LittleEndianStructure):
 
     # Some accelerators
 
+    def has_flag(self, flag):
+        return self.i_flags & flag != 0
+
     def get_file_type(self):
         file_type = self.i_mode & 0xF000
         try:
             return self.Mode(file_type)
         except ValueError:
             raise FSException(f"Unknwon file type 0x{file_type:X}")
+
+    def get_mode(self):
+        return self.i_mode & 0x0FFF
+
+    def get_size(self):
+        return self.i_size_high << 32 | self.i_size_lo
+
+    def get_ctime_ns(self):
+        """Combine i_ctime and i_ctime_extra fields"""
+        has_ctime_extra = self.i_extra_isize \
+                          > Inode.i_ctime_extra.offset - Inode.EXT2_GOOD_OLD_INODE_SIZE
+        return tools.read_timestamp_ns(self.i_ctime, self.i_ctime_extra if has_ctime_extra else None)
+
+    def get_mtime_ns(self):
+        """Combine i_mtime and i_mtime_extra fields"""
+        has_mtime_extra = self.i_extra_isize \
+                          > Inode.i_mtime_extra.offset - Inode.EXT2_GOOD_OLD_INODE_SIZE
+        return tools.read_timestamp_ns(self.i_mtime, self.i_mtime_extra if has_mtime_extra else None)
+
+    def get_atime_ns(self):
+        """Combine i_atime and i_atime_extra fields"""
+        has_atime_extra = self.i_extra_isize \
+                          > Inode.i_atime_extra.offset - Inode.EXT2_GOOD_OLD_INODE_SIZE
+        return tools.read_timestamp_ns(self.i_atime, self.i_atime_extra if has_atime_extra else None)
+
+    def get_block_count(self):
+        bc = self.i_blocks_lo
+        # FIXME: not sure of the interpretation of the documentation
+        if self.filesystem.conf.s_creator_os == Superblock.CreatorOS.LINUX:
+            if self.filesystem.conf.has_flag(Superblock.FeatureRoCompat.RO_COMPAT_HUGE_FILE):
+                bc += self.i_osd2.linux2.l_i_blocks_high << 32
+        return bc
+
+    def get_blocksize(self):
+        if not self.filesystem.conf.has_flag(Superblock.FeatureRoCompat.RO_COMPAT_HUGE_FILE):
+            return 512
+        elif not self.has_flag(Inode.Flags.HUGE_FILE):
+            return 512  # FIXME: that's how I understand documentation, but
+                        # kernel implementation seems to prefer filesystem
+                        # blocks there
+        else:
+            return self.filesystem.conf.get_block_size()
 
     # Field types
 

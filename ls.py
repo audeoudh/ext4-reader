@@ -1,6 +1,7 @@
+import datetime
 import logging
 
-from ext4 import Filesystem, FileType
+from ext4 import Filesystem, FileType, tools
 
 
 def main(block_device, path, show_hidden=False, long_format=False):
@@ -23,9 +24,15 @@ def main(block_device, path, show_hidden=False, long_format=False):
             if not long_format:
                 print(file.filename)
             else:
-                print("{rights:10} {nb_links} {owner} {group} {size} {date} {filename}"
-                      .format(rights="?", nb_links=5, owner=1000, group=1000,
-                              size=1000, date="?????", filename=file.filename))
+                stat = file.get_stat()
+                rights = tools.get_string_mode(stat.st_mode)
+                mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+                # TODO: dereference symlinks?
+                print("{file_type}{rights:9} {nb_links: >2d} {owner: >4d} {group: >4d} {size: >5d} {date} {filename}"
+                      .format(file_type='?', rights=rights, nb_links=stat.st_nlink,
+                              owner=stat.st_uid, group=stat.st_gid,
+                              size=stat.st_size, date=mtime.isoformat(),
+                              filename=file.filename))
 
 
 def _args_parser():
