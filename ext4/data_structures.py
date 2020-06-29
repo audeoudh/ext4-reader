@@ -144,6 +144,13 @@ class Superblock(ctypes.LittleEndianStructure):
 
     # Field types
 
+    class CreatorOS(enum.IntEnum):
+        LINUX = 0
+        HURD = 1
+        MASIX = 2
+        FEREBSD = 3
+        LITES = 4
+
     class FeatureCompat(enum.IntEnum):
         COMPAT_DIR_PREALLOC = 0x1
         COMPAT_IMAGIC_INODES = 0x2
@@ -291,6 +298,79 @@ class BlockGroupDescriptor64(BlockGroupDescriptor):
         return (self.bg_inode_table_hi << 32) + self.bg_inode_table_lo * self.filesystem.conf.get_block_size()
 
 
+# Inodes
+
+class _Inode_Linux1(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ('l_i_version', ctypes.c_uint32)
+    ]
+
+
+class _Inode_Hurd1(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ('h_i_translator', ctypes.c_uint32)
+    ]
+
+
+class _Inode_Masix1(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ('m_i_reserved', ctypes.c_uint32)
+    ]
+
+
+class _Inode_Osd1(ctypes.Union):
+    _pack_ = 1
+    _fields_ = [
+        ('linux1', _Inode_Linux1),
+        ('hurd1', _Inode_Hurd1),
+        ('masix1', _Inode_Masix1)
+    ]
+
+
+class _Inode_Linux2(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ('l_i_blocks_high', ctypes.c_uint16),
+        ('l_i_file_acl_high', ctypes.c_uint16),
+        ('l_i_uid_high', ctypes.c_uint16),
+        ('l_i_gid_high', ctypes.c_uint16),
+        ('l_i_checksum_lo', ctypes.c_uint16),
+        ('l_i_reserved', ctypes.c_uint16)
+    ]
+
+
+class _Inode_Hurd2(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ('h_i_reserved1', ctypes.c_uint16),
+        ('h_i_mode_high', ctypes.c_uint16),
+        ('h_i_uid_high', ctypes.c_uint16),
+        ('h_i_gid_high', ctypes.c_uint16),
+        ('h_i_author', ctypes.c_uint32)
+    ]
+
+
+class _Inode_Masix2(ctypes.LittleEndianStructure):
+    _pack_ = 1
+    _fields_ = [
+        ('m_i_reserved1', ctypes.c_uint16),
+        ('m_i_file_acl_high', ctypes.c_uint16),
+        ('m_i_reserved2', ctypes.c_uint32)
+    ]
+
+
+class _Inode_Osd2(ctypes.Union):
+    _pack_ = 1
+    _fields_ = [
+        ('linux2', _Inode_Linux2),
+        ('hurd2', _Inode_Hurd2),
+        ('masix2', _Inode_Masix2)
+    ]
+
+
 class Inode(ctypes.LittleEndianStructure):
     _pack_ = 1
     _fields_ = [
@@ -305,13 +385,13 @@ class Inode(ctypes.LittleEndianStructure):
         ("i_links_count", ctypes.c_uint16),
         ("i_blocks_lo", ctypes.c_uint32),
         ("i_flags", ctypes.c_uint32),
-        ("i_osd1", ctypes.c_uint8 * 4),
+        ("i_osd1", _Inode_Osd1),
         ("i_block", ctypes.c_uint32 * 15),
         ("i_generation", ctypes.c_uint32),
         ("i_file_acl_lo", ctypes.c_uint32),
         ("i_size_high", ctypes.c_uint32),  # i_dir_acl in ext2/3
         ("i_obso_faddr", ctypes.c_uint32),
-        ("i_osd2", ctypes.c_uint8 * 12),
+        ("i_osd2", _Inode_Osd2),
         ("i_extra_isize", ctypes.c_uint16),
         ("i_checksum_hi", ctypes.c_uint16),
         ("i_ctime_extra", ctypes.c_uint32),
