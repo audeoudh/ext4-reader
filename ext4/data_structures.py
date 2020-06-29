@@ -293,13 +293,13 @@ class BlockGroupDescriptor64(BlockGroupDescriptor):
         return csum == self.bg_checksum
 
     def get_bg_block_bitmap_loc(self):
-        return (self.bg_block_bitmap_hi << 32) + self.bg_block_bitmap_lo * self.filesystem.conf.get_block_size()
+        return (self.bg_block_bitmap_hi << 32) + self.bg_block_bitmap_lo
 
     def get_bg_inode_bitmap_loc(self):
-        return (self.bg_inode_bitmap_hi << 32) + self.bg_inode_bitmap_lo * self.filesystem.conf.get_block_size()
+        return (self.bg_inode_bitmap_hi << 32) + self.bg_inode_bitmap_lo
 
     def get_inode_table_loc(self):
-        return (self.bg_inode_table_hi << 32) + self.bg_inode_table_lo * self.filesystem.conf.get_block_size()
+        return (self.bg_inode_table_hi << 32) + self.bg_inode_table_lo
 
 
 # Inodes
