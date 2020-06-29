@@ -1,7 +1,10 @@
 import datetime
+import grp
 import logging
+import pwd
 
-from ext4 import Filesystem, FileType, tools
+from ext4 import Filesystem, tools
+import ext4.files
 
 
 def main(block_device, path, show_hidden=False, long_format=False):
@@ -17,21 +20,29 @@ def main(block_device, path, show_hidden=False, long_format=False):
             files = [file]
 
         # Display
-        if long_format:
-            print(f"total {len(files)}")  # TODO should be number of blocks (?)
-        for file in sorted(files, key=lambda file: file.filename):
-            if not long_format:
+        if not long_format:
+            for file in sorted(files, key=lambda file: file.filename.lower()):
                 print(file.filename)
-            else:
+        else:
+            print(f"total {len(files)}")  # TODO should be number of blocks (?)
+            lines = []
+            for file in sorted(files, key=lambda file: file.filename.lower()):
                 stat = file.get_stat()
-                rights = tools.get_string_mode(stat.st_mode)
-                mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
-                # TODO: dereference symlinks?
-                print("{file_type}{rights:9} {nb_links: >2d} {owner: >4d} {group: >4d} {size: >5d} {date} {filename}"
-                      .format(file_type='?', rights=rights, nb_links=stat.st_nlink,
-                              owner=stat.st_uid, group=stat.st_gid,
-                              size=stat.st_size, date=mtime.isoformat(),
-                              filename=file.filename))
+                file_type = tools.human_readable_file_type(stat.st_mode)
+                rights = tools.human_readable_mode(stat.st_mode)
+                mtime = datetime.datetime.fromtimestamp(stat.st_mtime) \
+                    .strftime("%Y-%m-%d %H:%M")
+                owner = pwd.getpwuid(stat.st_uid).pw_name
+                group = grp.getgrgid(stat.st_gid).gr_name
+                fname = str(path + ("/" if not path.endswith("/") else "") + file.filename)
+                if isinstance(file, ext4.files.SymbolicLink):
+                    fname += " -> " + file.get_target()
+                lines.append((file_type, rights, str(stat.st_nlink),
+                              owner, group, str(stat.st_size), mtime, fname))
+            col_length = [max(len(f) for f in fs) for fs in zip(*lines)]
+            for line in lines:
+                print("{:{}}{:{}} {: >{}} {: >{}} {: >{}} {: >{}} {:{}} {}"
+                      .format(*[c for cc in zip(line, col_length) for c in cc]))
 
 
 def _args_parser():
