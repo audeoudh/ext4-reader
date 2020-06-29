@@ -43,10 +43,8 @@ class File:
         self.content = FileContent(self.filesystem, inode)
         logger.info("Open file \"%s\" (inode %d, is a %s)", path, inode_no, self.__class__.__name__)
 
-    @property
-    @abc.abstractmethod
-    def file_type(self):
-        raise NotImplementedError
+    def get_file_type(self):
+        return self.inode.get_file_type()
 
     @property
     def filename(self):
@@ -87,19 +85,11 @@ class Fifo(File):
         super().__init__(filesystem, path, inode_no, inode)
         raise NotImplementedError
 
-    @property
-    def file_type(self):
-        return Inode.Mode.IFIFO
-
 
 class CharDevice(File):
     def __init__(self, filesystem, path, inode_no, inode: Inode):
         super().__init__(filesystem, path, inode_no, inode)
         raise NotImplementedError
-
-    @property
-    def file_type(self):
-        return Inode.Mode.IFCHR
 
 
 class Directory(File):
@@ -115,10 +105,6 @@ class Directory(File):
         else:
             # Instanciate a subclass, OK
             return super().__new__(cls, filesystem, path, inode_no, inode)
-
-    @property
-    def file_type(self):
-        return Inode.Mode.IFDIR
 
     @abc.abstractmethod
     def _get_direntries(self) -> Iterator[DirEntry]:
@@ -212,31 +198,19 @@ class BlockDevice(File):
         super().__init__(filesystem, path, inode_no, inode)
         raise NotImplementedError
 
-    @property
-    def file_type(self):
-        return Inode.Mode.IFBLK
-
 
 class RegularFile(File):
-    @property
-    def file_type(self):
-        return Inode.Mode.IFREG
+    pass
 
 
 class SymbolicLink(File):
-    @property
-    def file_type(self):
-        return Inode.Mode.IFLNK
+    pass
 
 
 class Socket(File):
     def __init__(self, filesystem, path, inode_no, inode: Inode):
         super().__init__(filesystem, path, inode_no, inode)
         raise NotImplementedError
-
-    @property
-    def file_type(self):
-        return Inode.Mode.IFSOCK
 
 
 class FileContent:

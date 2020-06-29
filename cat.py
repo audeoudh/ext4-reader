@@ -8,7 +8,7 @@ def main(block_device, path):
         with Filesystem(block_device) as filesystem:
             # Obtaining list of files to display
             file = filesystem.get_file(path)
-            if file.file_type == FileType.IFREG:
+            if file.get_file_type() == FileType.IFREG:
                 print(file.content.get_bytes().decode('utf-8'), end="")
             else:
                 print(f"{path}: is not a regular file", file=sys.stderr)

@@ -8,9 +8,8 @@ def main(block_device, path, show_hidden=False, long_format=False):
     with Filesystem(block_device) as filesystem:
         # Obtaining list of files to display
         file = filesystem.get_file(path)
-        if file.file_type is FileType.IFDIR:
-            dir = file
-            files = list(dir.get_files())
+        if isinstance(file, ext4.files.Directory):
+            files = list(file.get_files())
             if not show_hidden:
                 # Get rid of files starting with .
                 files = list(filter(lambda file: not file.filename.startswith("."), files))
