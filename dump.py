@@ -1,7 +1,6 @@
 import ctypes
 import string
 
-import ext4.tools
 from ext4 import Filesystem
 from ext4.files import FileContent, Directory, DirectIndirectFileContent
 
@@ -26,28 +25,38 @@ def _raw_dump(filesystem, blob, offset=0):
         print("")
 
 
+def _print_table(lines):
+    c1s, c2s, c3s = (max(map(len, col)) for col in zip(*lines))
+    for c1, c2, c3 in lines:
+        print("{c1:{c1s}}  {c2:>{c2s}}  {c3}".format(c1=c1, c2=c2, c3=c3, c1s=c1s, c2s=c2s))
+
+
 def _dump_struct(struct, **comments):
     lines = []
     fields = [f for k in reversed(struct.__class__.__mro__) if hasattr(k, '_fields_') for f in k._fields_]
     for name, type_ in fields:
         field = getattr(struct.__class__, name)
         value = getattr(struct, name)
-        if issubclass(type_, ctypes.Array):
-            fshex = field.size // len(value) * 2
-            value_str = " ".join(f"{v:0{fshex}X}" for v in value)
-            if len(value_str) > 20:
-                value_str = value_str[:13] + "..." + value_str[-4:]
-        else:
-            fshex = field.size * 2
-            value_str = f"0x{value:0{fshex}X}"
         try:
             comment = comments[name]
         except LookupError:
             comment = ""
-        lines.append((name, value_str, comment))
-    c1s, c2s, c3s = (max(map(len, col)) for col in zip(*lines))
-    for c1, c2, c3 in lines:
-        print("{c1:{c1s}} {c2:>{c2s}} {c3}".format(c1=c1, c2=c2, c3=c3, c1s=c1s, c2s=c2s))
+        if issubclass(type_, ctypes.Array):
+            fshex = field.size // len(value) * 2
+            value_str = "".join(f"{v:0{fshex}X}" for v in value)
+            if len(value_str) > 20:
+                value_str = value_str[:12] + ".." + value_str[-6:]
+            lines.append((name, value_str, comment))
+        elif issubclass(type_, (ctypes.Union, ctypes.Structure)):
+            value_type = "UNION" if issubclass(type_, ctypes.Union) else "STRUCT"
+            lines.append((name, value_type, comment))
+            sub_lines = _dump_struct(value, **comments)
+            sub_lines = [("  " + n, v, c) for n, v, c in sub_lines]
+            lines.extend(sub_lines)
+        else:
+            fshex = field.size * 2
+            lines.append((name, f"0x{value:0{fshex}X}", comment))
+    return lines
 
 
 def _collect_flags(value, flag_list):
@@ -64,11 +73,12 @@ def superblock_dump(filesystem):
     compat_flags = _collect_flags(superblock.s_feature_compat, superblock.FeatureCompat)
     incompat_flags = _collect_flags(superblock.s_feature_incompat, superblock.FeatureIncompat)
     ro_compat_flags = _collect_flags(superblock.s_feature_ro_compat, superblock.FeatureRoCompat)
-    _dump_struct(superblock,
-                 s_feature_compat=compat_flags,
-                 s_feature_incompat=incompat_flags,
-                 s_feature_ro_compat=ro_compat_flags,
-                 s_volume_name="\"" + superblock.get_volume_name() + "\"")
+    _print_table(_dump_struct(
+        superblock,
+        s_feature_compat=compat_flags,
+        s_feature_incompat=incompat_flags,
+        s_feature_ro_compat=ro_compat_flags,
+        s_volume_name="\"" + superblock.get_volume_name() + "\""))
     print("Raw data:")
     _raw_dump(filesystem, superblock)
 
@@ -82,9 +92,10 @@ def block_group_descriptor_dump(filesystem, block_group_no):
     except ext4.tools.FSException:
         cksum = False
     flags = _collect_flags(bgd.bg_flags, bgd.Flags)
-    _dump_struct(bgd,
-                 bg_checksum=("valid" if cksum else "INVALID"),
-                 bg_flags=flags)
+    _print_table(_dump_struct(
+        bgd,
+        bg_checksum=("valid" if cksum else "INVALID"),
+        bg_flags=flags))
     print("Raw data:")
     _raw_dump(filesystem, bgd, offset=bgd.pos)
 
@@ -103,10 +114,11 @@ def inode_dump(filesystem, inode_no, action='metadata'):
             if (inode.i_mode & 0xF000) == ft:
                 mode += f"|{ft.name}"
         flags = _collect_flags(inode.i_flags, inode.Flags)
-        _dump_struct(inode,
-                     i_checksum_hi=("valid" if cksum else "INVALID"),
-                     i_flags=flags,
-                     i_mode=mode)
+        _print_table(_dump_struct(
+            inode,
+            i_checksum_hi=("valid" if cksum else "INVALID"),
+            i_flags=flags,
+            i_mode=mode))
     elif action == 'blocks':
         file_content = FileContent(filesystem, inode)
         print("Has a " +
@@ -131,6 +143,7 @@ def block_dump(filesystem, block_no):
 
 if __name__ == '__main__':
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("block_device")
     subparsers = parser.add_subparsers()
