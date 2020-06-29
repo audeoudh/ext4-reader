@@ -23,6 +23,8 @@ class SpecialInode(enum.IntEnum):
 
 
 class Filesystem:
+    fail_on_wrong_checksum = True
+
     def __init__(self, block_device):
         self.block_device = block_device
         self.fd = ...
@@ -32,7 +34,7 @@ class Filesystem:
         self.fd = os.open(self.block_device, os.O_RDONLY)
         # 1024s hardcoded here, because we do not know anything about the filesystem currently
         superblock = self.get_bytes(0x400, 1024)
-        self.conf = Superblock().read_bytes(superblock)
+        self.conf = Superblock(self).read_bytes(superblock)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -65,7 +67,7 @@ class Filesystem:
         return self.get_bytes(index * self.conf.get_block_size(), n * self.conf.get_block_size())
 
     @functools.lru_cache(32)  # 128B per entry
-    def get_block_group_desc(self, bg_no, strict=True) -> BlockGroupDescriptor:
+    def get_block_group_desc(self, bg_no) -> BlockGroupDescriptor:
         # Compute block group position
         bgd_size = self.conf.s_desc_size if self.conf.has_flag(self.conf.FeatureIncompat.INCOMPAT_64BIT) else 32
         bgd_per_block = self.conf.get_block_size() // bgd_size
@@ -89,20 +91,20 @@ class Filesystem:
         # Retrieve and parse data
         if self.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_64BIT):
             return BlockGroupDescriptor64(self, bg_no, bgd_pos) \
-                .read_bytes(self.get_bytes(bgd_pos, 64), strict=strict)
+                .read_bytes(self.get_bytes(bgd_pos, 64))
         else:
             return BlockGroupDescriptor(self, bg_no, bgd_pos) \
-                .read_bytes(self.get_bytes(bgd_pos, 32), strict=strict)
+                .read_bytes(self.get_bytes(bgd_pos, 32))
 
-    def get_inode(self, inode_no, strict=True) -> Inode:
+    def get_inode(self, inode_no) -> Inode:
         # Compute inode position
         bg_no = (inode_no - 1) // self.conf.s_inodes_per_group
-        bgd = self.get_block_group_desc(bg_no, strict=strict)
+        bgd = self.get_block_group_desc(bg_no)
         inode_index = (inode_no - 1) % self.conf.s_inodes_per_group
         inode_pos = bgd.get_inode_table_loc() * self.conf.get_block_size() + self.conf.s_inode_size * inode_index
         # Retrieve and parse data
         struct_data = self.get_bytes(inode_pos, self.conf.s_inode_size)
-        inode = Inode(self, inode_no, inode_pos).read_bytes(struct_data, strict=strict)
+        inode = Inode(self, inode_no, inode_pos).read_bytes(struct_data)
         return inode
 
     def get_file(self, path) -> File:

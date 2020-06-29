@@ -105,23 +105,28 @@ class Superblock(ctypes.LittleEndianStructure):
         ("s_checksum", ctypes.c_uint32),
     ]
 
-    def read_bytes(self, struct_data, strict=True):
+    def __init__(self, filesystem):
+        super().__init__()
+        self.filesystem = filesystem
+
+    def read_bytes(self, struct_data):
         fit = min(len(struct_data), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
-        if strict:
-            self._verify_checksums(struct_data)
+        if self.filesystem.fail_on_wrong_checksum \
+                and not self.verify_checksums(struct_data):
+            raise FSException(f"Wrong checksum in superblock")
         logger.info("Decoded superbock: FS UUID = %s", self._format_uuid())
         return self
 
     def _format_uuid(self):
         return "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x" % tuple(self.s_uuid)
 
-    def _verify_checksums(self, struct_data):
+    def verify_checksums(self, struct_data):
         if self.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM != 0:
             data = struct_data[:0x3FC]
             csum = crc32c(data)
-            if csum != self.s_checksum:
-                raise FSException(f"Wrong checksum in superblock")
+            return csum == self.s_checksum
+        return True  # Nothing to check
 
     # Some accelerators
 
@@ -220,19 +225,19 @@ class BlockGroupDescriptor(ctypes.LittleEndianStructure):
         self.no = bg_no
         self.pos = bgd_pos
 
-    def read_bytes(self, struct_data, strict=True):
+    def read_bytes(self, struct_data):
         fit = min(len(struct_data), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
-        if strict:
-            self._verify_checksums()
+        if self.filesystem.fail_on_wrong_checksum \
+                and not self.verify_checksums():
+            raise FSException(f"Wrong checksum in block group descriptor {self.no}")
         logger.info("Decoded block group descriptor %d (@%X)", self.no, self.pos)
         return self
 
-    def _verify_checksums(self):
+    def verify_checksums(self):
         data = bytes(self.filesystem.UUID) + self.no.to_bytes(4, 'little') + bytes(self)[:0x1E]
         csum = self._get_checksum_algo()(data) & 0xFFFF
-        if csum != self.bg_checksum:
-            raise FSException(f"Wrong checksum in block group descriptor {self.no}")
+        return csum == self.bg_checksum
 
     def _get_checksum_algo(self):
         if self.filesystem.conf.s_feature_ro_compat & Superblock.FeatureRoCompat.RO_COMPAT_GDT_CSUM != 0 \
@@ -281,12 +286,11 @@ class BlockGroupDescriptor64(BlockGroupDescriptor):
         ("bg_reserved", ctypes.c_uint32)
     ]
 
-    def _verify_checksums(self):
+    def verify_checksums(self):
         data = bytes(self.filesystem.UUID) + self.no.to_bytes(4, 'little') + bytes(self)[:0x1E] \
                + b"\x00\x00" + bytes(self)[0x20:]
         csum = self._get_checksum_algo()(data) & 0xFFFF
-        if csum != self.bg_checksum:
-            raise FSException(f"Wrong checksum in block group descriptor {self.no}")
+        return csum == self.bg_checksum
 
     def get_bg_block_bitmap_loc(self):
         return (self.bg_block_bitmap_hi << 32) + self.bg_block_bitmap_lo * self.filesystem.conf.get_block_size()
@@ -409,11 +413,12 @@ class Inode(ctypes.LittleEndianStructure):
         self.no = inode_no
         self.pos = position
 
-    def read_bytes(self, struct_data, strict=True):
+    def read_bytes(self, struct_data):
         fit = min(len(struct_data), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
-        if strict:
-            self._verify_checksums()
+        if self.filesystem.fail_on_wrong_checksum \
+                and not self.verify_checksums():
+            raise FSException(f"Wrong checksum in inode {self.no}")
         return self
 
     def _verify_checksums(self):
@@ -496,6 +501,8 @@ class Inode(ctypes.LittleEndianStructure):
         RESERVED = 0x80000000
 
 
+# Inode's content
+
 class ExtentHeader(ctypes.LittleEndianStructure):
     _pack_ = 1
     _fields_ = [
@@ -506,10 +513,15 @@ class ExtentHeader(ctypes.LittleEndianStructure):
         ("eh_generation", ctypes.c_uint32)
     ]
 
-    def read_bytes(self, struct_data, strict=True):
+    def __init__(self, filesystem):
+        super().__init__()
+        self.filesystem = filesystem
+
+    def read_bytes(self, struct_data):
         fit = min(len(struct_data), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), struct_data, fit)
-        if strict and not self.magic_is_valid():
+        if self.filesystem.fail_on_wrong_checksum \
+                and not self.magic_is_valid():
             raise FSException("Magic is not valid in extent tree header")
         return self
 

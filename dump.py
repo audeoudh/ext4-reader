@@ -86,11 +86,7 @@ def superblock_dump(filesystem):
 def block_group_descriptor_dump(filesystem, block_group_no):
     bgd = filesystem.get_block_group_desc(block_group_no, strict=False)
     print(f"Block group descriptor {bgd.no} of {filesystem.block_device} (@0x{bgd.pos:X}):")
-    try:
-        bgd._verify_checksums()
-        cksum = True
-    except ext4.tools.FSException:
-        cksum = False
+    cksum = bgd.verify_checksums()
     flags = _collect_flags(bgd.bg_flags, bgd.Flags)
     _print_table(_dump_struct(
         bgd,
@@ -104,11 +100,7 @@ def inode_dump(filesystem, inode_no, action='metadata'):
     inode = filesystem.get_inode(inode_no)
     print(f"Inode {inode.no} of {filesystem.block_device} (@0x{inode.pos:X}):")
     if action == 'metadata':
-        try:
-            inode._verify_checksums()
-            cksum = True
-        except ext4.tools.FSException:
-            cksum = False
+        cksum = inode.verify_checksums()
         mode = _collect_flags(inode.i_mode, list(inode.Mode)[:12])
         for ft in list(inode.Mode)[12:]:
             if (inode.i_mode & 0xF000) == ft:
@@ -171,5 +163,7 @@ if __name__ == '__main__':
     block_device = args.block_device
     del args.func
     del args.block_device
-    with Filesystem(block_device) as filesystem:
+    filesystem = Filesystem(block_device)
+    filesystem.fail_on_wrong_checksum = False
+    with filesystem:
         func(filesystem, **vars(args))

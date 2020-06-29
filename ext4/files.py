@@ -271,13 +271,12 @@ class DirectIndirectFileContent(FileContent):
 
 
 class ExtentTreeFileContent(FileContent):
-    def __init__(self, filesystem, inode, strict=True):
+    def __init__(self, filesystem, inode):
         super().__init__(filesystem, inode)
-        if strict:
-            ExtentHeader().read_bytes(self.inode.i_block, strict=strict)
+        ExtentHeader(self.filesystem).read_bytes(self.inode.i_block)  # Verify checksums
 
     def get_blocks_no(self):
-        header = ExtentHeader().read_bytes(self.inode.i_block)
+        header = ExtentHeader(self.filesystem).read_bytes(self.inode.i_block)
         if header.eh_depth != 0:
             # Index block locations are here
             idx_blocks = (ExtentIdx(self.inode.i_block[i * 12:(i + 1) * 12]) for i in range(header.eh_entries))
