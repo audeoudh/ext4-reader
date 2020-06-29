@@ -204,7 +204,8 @@ class RegularFile(File):
 
 
 class SymbolicLink(File):
-    pass
+    def get_target(self):
+        return self.content.get_bytes().decode("utf-8")
 
 
 class Socket(File):
@@ -219,10 +220,11 @@ class FileContent:
     def __new__(cls, filesystem, inode: Inode):
         if cls is FileContent:
             # Build a subclass of this abstract class
-            if inode.i_flags & inode.Flags.EXTENTS != 0:
+            if inode.i_flags & inode.Flags.INLINE_DATA != 0 or \
+                    inode.get_file_type() == Inode.Mode.IFLNK:
+                return InlineFileContent.__new__(InlineFileContent, filesystem, inode)
+            elif inode.i_flags & inode.Flags.EXTENTS != 0:
                 return ExtentTreeFileContent.__new__(ExtentTreeFileContent, filesystem, inode)
-            elif inode.i_flags & inode.Flags.INLINE_DATA != 0:
-                raise NotImplementedError("Inline data are not supported")
             else:
                 return DirectIndirectFileContent.__new__(DirectIndirectFileContent, filesystem, inode)
         else:
@@ -254,6 +256,18 @@ class FileContent:
         selected_blocks[0] = selected_blocks[0][start % block_size:]
         selected_blocks[-1] = selected_blocks[-1][:end % block_size]
         return b"".join(selected_blocks)
+
+
+class InlineFileContent(FileContent):
+    def get_blocks_no(self):
+        yield from []
+
+    def get_bytes(self, start=0, end=-1):
+        if end < 0:
+            end = self.inode.get_size() + end + 1
+        if not (0 <= start < end <= self.inode.get_size()):
+            raise ValueError(f"Cannot get file range between {start} and {end}")
+        return bytes(self.inode.i_block)[start:end]
 
 
 class DirectIndirectFileContent(FileContent):
