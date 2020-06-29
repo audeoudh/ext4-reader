@@ -147,6 +147,13 @@ class Superblock(ctypes.LittleEndianStructure):
         else:
             raise FSException(f"Unknown flag {flag}")
 
+    def get_csum_seed(self):
+        if self.filesystem.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_CSUM_SEED):
+            return self.filesystem.conf.s_checksum_seed
+        else:
+            return crc32c(self.filesystem.UUID)
+
+
     # Field types
 
     class CreatorOS(enum.IntEnum):
@@ -407,33 +414,62 @@ class Inode(ctypes.LittleEndianStructure):
         ("i_projid", ctypes.c_uint32)
     ]
 
+    EXT2_GOOD_OLD_INODE_SIZE = 128
+
     def __init__(self, filesystem, inode_no, position):
         super().__init__()
         self.filesystem = filesystem
         self.no = inode_no
         self.pos = position
+        self._extraneous_data = ...
 
     def read_bytes(self, struct_data):
-        fit = min(len(struct_data), ctypes.sizeof(self))
-        ctypes.memmove(ctypes.addressof(self), struct_data, fit)
+        if len(struct_data) < self.filesystem.conf.s_inode_size:
+            raise ValueError(f"Too few data to read a inode, "
+                             f"expected at least {self.filesystem.conf.s_inode_size} bytes")
+        min_size = self.EXT2_GOOD_OLD_INODE_SIZE + Inode.i_extra_isize.size
+        ctypes.memmove(ctypes.addressof(self), struct_data, min_size)
+        ctypes.memmove(ctypes.addressof(self) + min_size, struct_data[min_size:],
+                       self.i_extra_isize - Inode.i_extra_isize.size)
+        self._extraneous_data = struct_data[self.EXT2_GOOD_OLD_INODE_SIZE + self.i_extra_isize:
+                                            self.filesystem.conf.s_inode_size]
         if self.filesystem.fail_on_wrong_checksum \
                 and not self.verify_checksums():
             raise FSException(f"Wrong checksum in inode {self.no}")
         return self
 
-    def _verify_checksums(self):
-        # FIXME, not sure about calculation
-        if self.filesystem.conf.has_flag(Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM):
-            data = bytes(self.filesystem.UUID)
-            if self.filesystem.conf.has_flag(Superblock.FeatureIncompat.INCOMPAT_64BIT):
-                data += self.no.to_bytes(8, 'little')
-            else:
-                data += self.no.to_bytes(4, 'little')
-            struct_data = bytes(self)
-            data += struct_data[:0x82] + b"\x00\x00" + struct_data[0x84:]
-            csum = crc32c(data)
-            if (csum & 0xFFFF0000) >> 16 != self.i_checksum_hi:
-                raise FSException(f"Wrong checksum in inode {self.no}")
+    def verify_checksums(self):
+        if not self.filesystem.conf.has_flag(Superblock.FeatureRoCompat.RO_COMPAT_METADATA_CSUM):
+            return True  # No checksums
+        has_hi = self.i_extra_isize > Inode.i_extra_isize.size
+        has_lo = self.filesystem.conf.s_creator_os == Superblock.CreatorOS.LINUX
+        if not has_hi and not has_lo:
+            return True  # Nothing to check
+        # Compute expected checksum
+        seed = self.filesystem.conf.get_csum_seed()
+        checksum_lo_start = Inode.i_osd2.offset + _Inode_Linux2.l_i_checksum_lo.offset
+        checksum_hi_start = Inode.i_checksum_hi.offset
+        struct_data = bytes(self)
+        crc = crc32c(self.no.to_bytes(4, 'little'), seed)
+        crc = crc32c(self.i_generation.to_bytes(4, 'little'), crc)
+        crc = crc32c(struct_data[:checksum_lo_start], crc)
+        crc = crc32c(b"\x00" * 2 if has_lo else struct_data[checksum_lo_start:checksum_lo_start + 2], crc)
+        crc = crc32c(struct_data[checksum_lo_start + 2:checksum_hi_start], crc)
+        crc = crc32c(b"\x00" * 2 if has_hi else struct_data[checksum_hi_start:checksum_hi_start + 2], crc)
+        crc = crc32c(struct_data[checksum_hi_start + 2:], crc)
+        computed_csum = crc32c(self._extraneous_data, crc)
+        if not has_hi:
+            computed_csum &= 0x0000FFFF
+        if not has_lo:
+            computed_csum &= 0xFFFF0000
+        # Get provided checksum
+        provided_csum = 0
+        if has_hi:
+            provided_csum |= self.i_checksum_hi << 16
+        if has_lo:
+            provided_csum |= self.i_osd2.linux2.l_i_checksum_lo
+        # Compare
+        return computed_csum == provided_csum
 
     # Some accelerators
 

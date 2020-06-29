@@ -115,7 +115,6 @@ class Directory(File):
                 inode_no = direntry.inode
                 inode = self.filesystem.get_inode(inode_no)
                 return File(self.filesystem, full_path, inode_no, inode)
-        print(f"{path=}")
         raise FileNotFoundError(path) from None
 
     def get_file(self, path):
