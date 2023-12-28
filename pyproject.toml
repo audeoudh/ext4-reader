@@ -6,6 +6,9 @@ authors = [
 ]
 description = "Minimalist ext4 read-only implementation in Python "
 requires-python = ">=3.11"
+dependencies = [
+    "crcmod",
+]
 dynamic = ["readme"]
 
 [tool.setuptools]
